@@ -1,3 +1,4 @@
+import ThemePicker from './ThemePicker.jsx'
 import './home.css'
 
 const APPS = [
@@ -20,6 +21,9 @@ const APPS = [
 export default function Home() {
   return (
     <div className="home">
+      <div className="home-top">
+        <ThemePicker />
+      </div>
       <header className="home-header">
         <h1>My Apps</h1>
         <p>A little collection — tap one to play.</p>

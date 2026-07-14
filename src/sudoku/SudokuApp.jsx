@@ -6,6 +6,7 @@ import {
   completedUnitKeys,
   UNIT_CELLS,
 } from './sudoku.js'
+import ThemePicker from '../ThemePicker.jsx'
 import './sudoku.css'
 
 const GAME_KEY = 'sudoku.game.v1'
@@ -326,9 +327,12 @@ export default function SudokuApp() {
   return (
     <div className="sudoku-app">
       <header className="sk-header">
-        <a href="#/" className="back-link">
-          ← Apps
-        </a>
+        <div className="sk-left">
+          <a href="#/" className="back-link">
+            ← Apps
+          </a>
+          <ThemePicker />
+        </div>
         <h1>Sudoku</h1>
         <div className="sk-diff">
           {DIFFICULTIES.map((d) => (

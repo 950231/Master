@@ -6,6 +6,7 @@ import Dashboard from './components/Dashboard.jsx'
 import FilterBar from './components/FilterBar.jsx'
 import TradeForm from './components/TradeForm.jsx'
 import TradeTable from './components/TradeTable.jsx'
+import ThemePicker from './ThemePicker.jsx'
 
 const DEFAULT_FILTERS = {
   query: '',
@@ -135,6 +136,7 @@ export default function App() {
           </div>
         </div>
         <div className="header-actions">
+          <ThemePicker />
           <button className="btn ghost" onClick={exportJson}>
             Export
           </button>

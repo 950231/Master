@@ -20,6 +20,12 @@
   text-align: center;
   letter-spacing: -0.3px;
 }
+.sk-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: start;
+}
 .back-link {
   color: var(--accent);
   text-decoration: none;
@@ -242,13 +248,13 @@
   font-weight: 700;
 }
 .sk-cell.peer {
-  background: #131f36;
+  background: var(--hl-peer);
 }
 .sk-cell.same {
-  background: #1d3050;
+  background: var(--hl-same);
 }
 .sk-cell.selected {
-  background: #26456f;
+  background: var(--hl-selected);
   box-shadow: inset 0 0 0 2px var(--accent);
 }
 .sk-cell.conflict .sk-val {
