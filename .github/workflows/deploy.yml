@@ -7,19 +7,15 @@ on:
       - claude/new-app-development-ixy8q4
   workflow_dispatch:
 
-# Allow the workflow to publish to Pages.
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
-# Only one deploy at a time; let in-progress runs finish.
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,16 +28,9 @@ jobs:
       - run: npm ci
       - run: npm run build
 
-      - uses: actions/upload-pages-artifact@v3
+      # Publish the built site to the gh-pages branch. GitHub serves this
+      # branch as the Pages site (auto-enabled on first publish for public repos).
+      - uses: peaceiris/actions-gh-pages@v4
         with:
-          path: dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
