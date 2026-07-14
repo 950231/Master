@@ -67,7 +67,49 @@ function countSolutions(grid, limit = 2) {
 }
 
 // Approximate number of clues left in the starting puzzle per difficulty.
-const GIVENS = { easy: 45, medium: 34, hard: 28 }
+const GIVENS = { easy: 45, medium: 34, hard: 30, expert: 26 }
+
+// Precomputed cell indices for all 27 units (9 rows, 9 cols, 9 boxes),
+// keyed as 'r0'..'r8', 'c0'..'c8', 'b0'..'b8'.
+export const UNIT_CELLS = (() => {
+  const units = {}
+  for (let r = 0; r < 9; r++) {
+    units['r' + r] = Array.from({ length: 9 }, (_, c) => r * 9 + c)
+  }
+  for (let c = 0; c < 9; c++) {
+    units['c' + c] = Array.from({ length: 9 }, (_, r) => r * 9 + c)
+  }
+  for (let b = 0; b < 9; b++) {
+    const br = Math.floor(b / 3) * 3
+    const bc = (b % 3) * 3
+    const cells = []
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 3; c++) cells.push((br + r) * 9 + (bc + c))
+    }
+    units['b' + b] = cells
+  }
+  return units
+})()
+
+/** Keys of units that are fully filled with 1–9 and no duplicates. */
+export function completedUnitKeys(board) {
+  const keys = new Set()
+  for (const key in UNIT_CELLS) {
+    const cells = UNIT_CELLS[key]
+    const seen = new Set()
+    let ok = true
+    for (const i of cells) {
+      const v = board[i]
+      if (!v || seen.has(v)) {
+        ok = false
+        break
+      }
+      seen.add(v)
+    }
+    if (ok) keys.add(key)
+  }
+  return keys
+}
 
 /**
  * Build a puzzle with a single unique solution by digging holes out of a
