@@ -127,6 +127,7 @@ export default function App() {
     <div className="app">
       <header className="app-header">
         <div className="brand">
+          <a href="#/" className="brand-back" title="All apps">←</a>
           <span className="brand-mark">▲</span>
           <div>
             <h1>Trading Journal</h1>

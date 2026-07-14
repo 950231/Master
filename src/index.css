@@ -78,6 +78,24 @@ body {
   gap: 14px;
 }
 
+.brand-back {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--panel);
+  border: 1px solid var(--border-light);
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+.brand-back:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
 .brand-mark {
   display: grid;
   place-items: center;

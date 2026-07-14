@@ -1,10 +1,20 @@
-# Trading Journal
+# My Apps
 
-A fast, private trading journal built with **React + Vite**. Log every trade,
-track your P&L, and analyze what's actually working — all in the browser, with
-no backend and no account. Your data is stored locally in `localStorage`.
+A small collection of browser apps built with **React + Vite**, hosted on
+GitHub Pages. A hash-based launcher (`#/`) links to each one; everything runs
+client-side with data stored locally in `localStorage`.
 
-## Features
+- **📈 Trading Journal** (`#/journal`) — log trades, track P&L, analyze performance.
+- **🔢 Sudoku** (`#/sudoku`) — classic 9×9 puzzles with notes, hints, and a timer.
+
+---
+
+## Trading Journal
+
+A fast, private trading journal. Log every trade, track your P&L, and analyze
+what's actually working — no backend, no account.
+
+### Features
 
 - **Log trades** — symbol, direction (long/short), quantity, entry/exit price,
   dates, fees, strategy tag, and free-form notes.
@@ -43,6 +53,27 @@ For each trade:
 
 Aggregate metrics (win rate, profit factor, expectancy, equity curve) are
 computed only from **closed** trades — those with an exit price.
+
+---
+
+## Sudoku
+
+A classic 9×9 Sudoku with three difficulty levels. Every puzzle is generated
+with a **guaranteed unique solution** (holes are dug from a full solution and
+uniqueness is re-verified after each removal).
+
+### Features
+
+- Easy / Medium / Hard (fewer clues = harder).
+- On-screen number pad (touch-friendly) plus full keyboard support
+  (1–9, Backspace/Delete, arrow keys).
+- **Notes** (pencil marks), **Hint**, and **Erase** tools.
+- Live conflict highlighting, peer/same-number highlighting, a timer, and a
+  mistake counter.
+- Auto-saves the current game to `localStorage`.
+
+The engine lives in `src/sudoku/sudoku.js` (generator, solver, conflict
+detection) with the UI in `src/sudoku/SudokuApp.jsx`.
 
 ## Tech stack
 
