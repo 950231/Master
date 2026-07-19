@@ -8,7 +8,11 @@
 //
 // Each question: { id, subject, q, options: [4], answer: <index 0-3>, explanation }
 
+import { PAPER_SUBJECTS, PAPER_GROUPS, PAPER_QUESTIONS } from './previousPapers.js'
+
 export const SUBJECTS = [
+  // ----- Previous year papers -----
+  ...PAPER_SUBJECTS,
   // ----- Common (all candidates) -----
   { id: 'reason', name: 'Reasoning & Gen. Intelligence', icon: '🧩', group: 'common' },
   { id: 'ga', name: 'General Awareness', icon: '🌍', group: 'common' },
@@ -26,11 +30,15 @@ export const SUBJECTS = [
 ]
 
 export const GROUPS = {
+  ...PAPER_GROUPS,
   common: 'Common — all candidates',
   core: 'Core — Electrical (70 marks)',
 }
 
 export const QUESTIONS = [
+  // ==================== PREVIOUS YEAR PAPERS ====================
+  ...PAPER_QUESTIONS,
+
   // ==================== COMMON ====================
 
   // ---------- Reasoning ----------
