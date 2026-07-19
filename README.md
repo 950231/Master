@@ -6,6 +6,9 @@ client-side with data stored locally in `localStorage`.
 
 - **📈 Trading Journal** (`#/journal`) — log trades, track P&L, analyze performance.
 - **🔢 Sudoku** (`#/sudoku`) — classic 9×9 puzzles with notes, hints, and a timer.
+- **🎓 Exam Prep** (`#/exam`) — AP Vidyut AEE MCQ practice, timed mock tests, progress tracking.
+
+A **theme picker** (Midnight, Slate, Ocean, Grape, Light) is available in every app.
 
 ---
 
@@ -74,6 +77,29 @@ uniqueness is re-verified after each removal).
 
 The engine lives in `src/sudoku/sudoku.js` (generator, solver, conflict
 detection) with the UI in `src/sudoku/SudokuApp.jsx`.
+
+---
+
+## Exam Prep
+
+Practice app aligned to the **AP Vidyut AEE (Assistant Executive Engineer)** syllabus:
+a **Core** section (Electrical) plus the **Common** sections (Reasoning, General
+Awareness, Quantitative Aptitude, English, Computer Knowledge).
+
+### Features
+
+- **Practice by subject** with instant feedback and explanations.
+- **Timed mock tests** — question palette, submit, and a full answer review.
+- **Progress tracking** — questions answered, accuracy, and best mock score.
+- **Bookmarks** to revisit tricky questions.
+- **Import your own questions** as JSON to grow the bank toward full exam depth:
+  ```json
+  [{ "subject": "elec", "q": "…", "options": ["a","b","c","d"], "answer": 0, "explanation": "…" }]
+  ```
+
+The starter bank lives in `src/exam/questions.js`. To target a different branch
+(Telecom / Civil / Mechanical / Electronics), swap the `elec` core subject and
+seed questions accordingly.
 
 ## Tech stack
 

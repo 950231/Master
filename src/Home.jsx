@@ -16,6 +16,13 @@ const APPS = [
     desc: 'Classic 9×9 puzzles with notes, hints, and a timer.',
     accent: 'blue',
   },
+  {
+    href: '#/exam',
+    icon: '🎓',
+    title: 'Exam Prep',
+    desc: 'AP Vidyut AEE — practice MCQs, timed mock tests, and track progress.',
+    accent: 'green',
+  },
 ]
 
 export default function Home() {

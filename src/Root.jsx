@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Home from './Home.jsx'
 import JournalApp from './App.jsx'
 import SudokuApp from './sudoku/SudokuApp.jsx'
+import ExamApp from './exam/ExamApp.jsx'
 
 // Tiny hash-based router — works cleanly on GitHub Pages project subpaths
 // (only the URL fragment changes, never the path) with no extra dependencies.
@@ -23,5 +24,6 @@ export default function Root() {
   const route = useHashRoute()
   if (route === 'journal') return <JournalApp />
   if (route === 'sudoku') return <SudokuApp />
+  if (route === 'exam') return <ExamApp />
   return <Home />
 }

@@ -1,0 +1,446 @@
+.exam-app {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 20px 16px 48px;
+  min-height: 100vh;
+}
+
+.ex-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.ex-header h1 {
+  margin: 0;
+  font-size: 24px;
+  text-align: center;
+}
+.ex-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: start;
+}
+.ex-head-spacer {
+  justify-self: end;
+}
+
+/* ---------- Menu ---------- */
+.ex-syllabus-note {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text-dim);
+  text-align: center;
+  margin-bottom: 16px;
+}
+.ex-syllabus-note b {
+  color: var(--accent);
+}
+
+.ex-group {
+  margin-top: 18px;
+}
+.ex-group-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-faint);
+  margin-bottom: 10px;
+}
+
+.ex-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 22px;
+}
+.ex-stat {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 8px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ex-stat b {
+  font-size: 20px;
+  color: var(--accent);
+}
+.ex-stat span {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.ex-actions {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+.ex-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 22px 20px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, var(--panel), var(--bg-elevated));
+  border: 1px solid var(--border);
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  transition: transform 0.1s ease, border-color 0.15s ease;
+}
+.ex-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-light);
+}
+.ex-card.primary {
+  border-color: var(--accent);
+}
+.ex-card-icon {
+  font-size: 30px;
+}
+.ex-card-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+.ex-card-sub {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* ---------- Generic view ---------- */
+.ex-view {
+  animation: ex-fade 0.2s ease;
+}
+@keyframes ex-fade {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.ex-view h2 {
+  font-size: 20px;
+  margin: 4px 0 16px;
+}
+.ex-back,
+.ex-nav-btn {
+  background: var(--panel);
+  border: 1px solid var(--border-light);
+  color: var(--text);
+  border-radius: 9px;
+  padding: 8px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ex-back:hover,
+.ex-nav-btn:hover {
+  background: var(--panel-2);
+}
+.ex-nav-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.ex-empty {
+  color: var(--text-faint);
+  text-align: center;
+  padding: 40px 20px;
+}
+
+/* ---------- Subject picker ---------- */
+.ex-subjects {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+.ex-subject {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 18px;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 600;
+  text-align: left;
+}
+.ex-subject:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+.ex-subject:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.ex-subject.all {
+  border-color: var(--accent);
+  margin-bottom: 4px;
+  width: 100%;
+}
+.ex-subj-icon {
+  font-size: 26px;
+}
+.ex-subj-count {
+  font-size: 12px;
+  color: var(--text-faint);
+  font-weight: 500;
+}
+
+/* ---------- Quiz ---------- */
+.ex-quiz-top,
+.ex-mock-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.ex-progress {
+  font-weight: 700;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.ex-timer {
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.ex-timer.low {
+  color: var(--red);
+}
+.ex-bookmark {
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 8px;
+}
+.ex-bookmark.inline {
+  margin-left: 8px;
+  font-size: 16px;
+}
+
+.ex-subject-tag {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  border-radius: 20px;
+  margin-bottom: 12px;
+}
+.ex-question {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.5;
+  margin-bottom: 18px;
+}
+
+.ex-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ex-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border-light);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 15px;
+  text-align: left;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+.ex-option:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+.ex-option:disabled {
+  cursor: default;
+}
+.ex-opt-letter {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-light);
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.ex-option.selected {
+  border-color: var(--accent);
+  background: var(--hl-selected);
+}
+.ex-option.correct {
+  border-color: var(--green);
+  background: rgba(34, 197, 94, 0.14);
+}
+.ex-option.wrong {
+  border-color: var(--red);
+  background: rgba(239, 68, 68, 0.14);
+}
+
+.ex-feedback {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border-light);
+  background: var(--panel);
+}
+.ex-feedback.good b {
+  color: var(--green);
+}
+.ex-feedback.bad b {
+  color: var(--red);
+}
+.ex-feedback p {
+  margin: 8px 0 14px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  font-size: 14px;
+}
+
+.ex-primary-btn {
+  background: var(--accent);
+  color: #05130a;
+  border: none;
+  border-radius: 10px;
+  padding: 11px 20px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.ex-primary-btn:hover {
+  filter: brightness(1.08);
+}
+
+/* ---------- Summary ---------- */
+.ex-summary {
+  text-align: center;
+  padding: 30px 20px 20px;
+}
+.ex-summary-emoji {
+  font-size: 52px;
+}
+.ex-summary h2 {
+  margin: 8px 0;
+}
+.ex-summary p {
+  color: var(--text-dim);
+  margin-bottom: 20px;
+}
+
+/* ---------- Mock palette & nav ---------- */
+.ex-palette {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.ex-pal {
+  aspect-ratio: 1;
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  background: var(--panel);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.ex-pal.done {
+  background: var(--hl-selected);
+  color: var(--text);
+  border-color: var(--accent);
+}
+.ex-pal.current {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.ex-mock-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+/* ---------- Review ---------- */
+.ex-review-title {
+  margin: 26px 0 12px;
+  font-size: 16px;
+}
+.ex-review {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ex-review-item {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.ex-review-q {
+  font-weight: 600;
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+.ex-review-opt {
+  font-size: 14px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+.ex-review-opt.correct {
+  color: var(--green);
+  background: rgba(34, 197, 94, 0.12);
+  font-weight: 600;
+}
+.ex-review-opt.wrong {
+  color: var(--red);
+  background: rgba(239, 68, 68, 0.12);
+}
+.ex-review-exp {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-faint);
+  line-height: 1.5;
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
+}
+
+@media (max-width: 520px) {
+  .ex-actions,
+  .ex-subjects {
+    grid-template-columns: 1fr;
+  }
+  .ex-subject.all {
+    grid-column: span 1;
+  }
+  .ex-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .ex-palette {
+    grid-template-columns: repeat(8, 1fr);
+  }
+}
