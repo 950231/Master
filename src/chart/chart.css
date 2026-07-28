@@ -81,6 +81,85 @@
   border-color: transparent;
 }
 
+/* ---------- Replay bar ---------- */
+.ch-replay {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 9px 12px;
+  margin-bottom: 10px;
+}
+
+.ch-replay-controls {
+  display: flex;
+  gap: 6px;
+}
+.ch-replay-controls button {
+  background: var(--panel-2);
+  border: 1px solid var(--border-light);
+  color: var(--text);
+  border-radius: 8px;
+  min-width: 42px;
+  padding: 8px 10px;
+  font-size: 15px;
+  cursor: pointer;
+  line-height: 1;
+}
+.ch-replay-controls button:hover {
+  background: var(--border-light);
+}
+.ch-replay-controls .play {
+  background: var(--accent);
+  color: #04121d;
+  border-color: transparent;
+  font-weight: 700;
+  min-width: 54px;
+}
+
+.ch-speeds {
+  display: flex;
+  gap: 3px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+}
+.ch-speed {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.ch-speed.active {
+  background: var(--accent);
+  color: #04121d;
+}
+
+.ch-scrub {
+  flex: 1;
+  min-width: 140px;
+  accent-color: var(--accent);
+}
+.ch-replay-pos {
+  font-size: 12px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ch-toggle.replay.active {
+  background: var(--accent);
+  color: #04121d;
+}
+
 /* ---------- Readout ---------- */
 .ch-readout {
   display: flex;
