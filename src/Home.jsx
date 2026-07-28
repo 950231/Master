@@ -23,6 +23,13 @@ const APPS = [
     desc: 'AP Vidyut AEE — practice MCQs, timed mock tests, and track progress.',
     accent: 'green',
   },
+  {
+    href: '#/chart',
+    icon: '📊',
+    title: 'NIFTY Chart',
+    desc: '10 years of NIFTY 50 candles — zoom, pan, and switch timeframes.',
+    accent: 'blue',
+  },
 ]
 
 export default function Home() {

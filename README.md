@@ -7,6 +7,7 @@ client-side with data stored locally in `localStorage`.
 - **📈 Trading Journal** (`#/journal`) — log trades, track P&L, analyze performance.
 - **🔢 Sudoku** (`#/sudoku`) — classic 9×9 puzzles with notes, hints, and a timer.
 - **🎓 Exam Prep** (`#/exam`) — AP Vidyut AEE MCQ practice, timed mock tests, progress tracking.
+- **📊 NIFTY Chart** (`#/chart`) — 10 years of NIFTY 50 candles with zoom, pan and timeframes.
 
 A **theme picker** (Midnight, Slate, Ocean, Grape, Light) is available in every app.
 
@@ -100,6 +101,34 @@ Awareness, Quantitative Aptitude, English, Computer Knowledge).
 The starter bank lives in `src/exam/questions.js`. To target a different branch
 (Telecom / Civil / Mechanical / Electronics), swap the `elec` core subject and
 seed questions accordingly.
+
+---
+
+## NIFTY Chart
+
+An interactive candlestick chart over **10 years of NIFTY 50 data**
+(2016-01-18 → 2026-01-14, 183,254 five-minute bars).
+
+### Features
+
+- Timeframes: **1W / 1D / 1H / 30m / 15m / 5m** (5m is chosen per year).
+- **Canvas rendering** so tens of thousands of candles stay smooth — below
+  ~3 px per bar it switches to high/low lines automatically.
+- **Pan** by dragging, **zoom** with the scroll wheel or a two-finger pinch
+  (touch-friendly for tablets), plus zoom buttons and Reset.
+- Crosshair with an **OHLC + change readout**, and optional **MA20 / MA50**.
+
+### Data pipeline
+
+The raw CSV is ~10 MB, too heavy to ship to every visitor, so it is
+pre-aggregated into compact columnar JSON and fetched on demand:
+
+```bash
+node scripts/build-nifty-data.mjs path/to/NIFTY_10Y_5MIN.csv
+```
+
+This writes `public/nifty/` — daily is only ~105 KB (loads instantly) while
+5-minute data is split per year (~800 KB each) and fetched only when viewed.
 
 ## Tech stack
 

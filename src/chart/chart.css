@@ -1,0 +1,187 @@
+.chart-app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px 16px 28px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.ch-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.ch-header h1 {
+  margin: 0;
+  font-size: 22px;
+  text-align: center;
+  letter-spacing: -0.3px;
+}
+.ch-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: start;
+}
+.ch-head-spacer {
+  justify-self: end;
+}
+
+/* ---------- Toolbar ---------- */
+.ch-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.ch-tfs {
+  display: flex;
+  gap: 3px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 3px;
+}
+.ch-tf {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 7px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.ch-tf:hover {
+  color: var(--text);
+}
+.ch-tf.active {
+  background: var(--accent);
+  color: #04121d;
+}
+
+.ch-year,
+.ch-toggle {
+  background: var(--panel);
+  border: 1px solid var(--border-light);
+  color: var(--text);
+  border-radius: 9px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ch-toggle.active {
+  background: var(--accent);
+  color: #04121d;
+  border-color: transparent;
+}
+
+/* ---------- Readout ---------- */
+.ch-readout {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text-dim);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 14px;
+  margin-bottom: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.ch-readout b {
+  color: var(--text);
+  font-weight: 700;
+}
+.ch-date {
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* ---------- Canvas ---------- */
+.ch-canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 380px;
+  height: 58vh;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: crosshair;
+  touch-action: none; /* we handle pan/pinch ourselves */
+}
+.ch-canvas-wrap canvas {
+  display: block;
+}
+
+.ch-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-faint);
+  font-size: 14px;
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+.ch-overlay.error {
+  color: var(--red);
+}
+
+/* ---------- Footer ---------- */
+.ch-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.ch-zoom {
+  display: flex;
+  gap: 6px;
+}
+.ch-zoom button {
+  background: var(--panel);
+  border: 1px solid var(--border-light);
+  color: var(--text);
+  border-radius: 9px;
+  padding: 8px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  min-width: 44px;
+}
+.ch-zoom button:hover {
+  background: var(--panel-2);
+}
+.ch-hint {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+@media (max-width: 560px) {
+  .ch-header {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 8px;
+  }
+  .ch-left {
+    justify-self: center;
+  }
+  .ch-canvas-wrap {
+    height: 52vh;
+    min-height: 300px;
+  }
+  .ch-readout {
+    gap: 10px;
+    font-size: 12px;
+  }
+}
