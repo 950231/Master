@@ -87,7 +87,8 @@ export default function NiftyChart() {
 
   const [view, setView] = useState({ start: 0, count: 200 })
   const [cursor, setCursor] = useState(null) // {i, price, x, y}
-  const [replay, setReplay] = useState({ active: false, at: 0, playing: false, ms: 500 })
+  // `picking` is the TradingView-style 'choose your start bar' phase.
+  const [replay, setReplay] = useState({ active: false, at: 0, playing: false, ms: 500, picking: false })
 
   const [tool, setTool] = useState('cursor')
   const [drawings, setDrawings] = useState([])
@@ -139,7 +140,7 @@ export default function NiftyChart() {
         setData(d)
         const count = Math.min(200, d.count)
         setView({ start: Math.max(0, d.count - count), count })
-        setReplay((r) => ({ ...r, active: false, playing: false, at: 0 }))
+        setReplay((r) => ({ ...r, active: false, playing: false, picking: false, at: 0 }))
         setLoading(false)
       })
       .catch((e) => {
@@ -175,7 +176,8 @@ export default function NiftyChart() {
   const ma20 = useMemo(() => (data && showMA ? sma(data.c, 20) : null), [data, showMA])
   const ma50 = useMemo(() => (data && showMA ? sma(data.c, 50) : null), [data, showMA])
 
-  const revealEnd = replay.active && data ? Math.min(data.count, replay.at + 1) : data?.count ?? 0
+  const revealEnd =
+    replay.active && !replay.picking && data ? Math.min(data.count, replay.at + 1) : data?.count ?? 0
 
   // ---------------- drawing ----------------
   const draw = useCallback(() => {
@@ -433,8 +435,30 @@ export default function NiftyChart() {
       ctx.lineWidth = 1
     }
 
+    // ---- replay start-picker: red line that follows the cursor ----
+    if (replay.active && replay.picking && cursor?.x != null) {
+      const cx = Math.max(PAD.l, Math.min(PAD.l + plotW, cursor.x))
+      ctx.strokeStyle = down
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.moveTo(cx, PAD.t)
+      ctx.lineTo(cx, PAD.t + plotH)
+      ctx.stroke()
+      ctx.lineWidth = 1
+      const msg = 'Click to start replay here'
+      ctx.font = 'bold 12px system-ui, sans-serif'
+      const mw = ctx.measureText(msg).width
+      const bx = Math.max(PAD.l + 4, Math.min(cx + 8, PAD.l + plotW - mw - 14))
+      ctx.fillStyle = down
+      ctx.fillRect(bx, PAD.t + 6, mw + 12, 22)
+      ctx.fillStyle = '#fff'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(msg, bx + 6, PAD.t + 17)
+      ctx.font = '11px system-ui, sans-serif'
+    }
+
     // ---- replay "now" marker ----
-    if (replay.active && end > start) {
+    if (replay.active && !replay.picking && end > start) {
       const x = xOf(end - 1) + barW / 2
       ctx.strokeStyle = accent
       ctx.setLineDash([3, 3])
@@ -481,7 +505,7 @@ export default function NiftyChart() {
         ctx.fillText(tLabel, bx + 6, axisY + 12)
       }
     }
-  }, [data, view, cursor, tf, ma20, ma50, replay.active, revealEnd, drawings, pending, selected])
+  }, [data, view, cursor, tf, ma20, ma50, replay.active, replay.picking, revealEnd, drawings, pending, selected])
 
   useEffect(() => draw(), [draw])
 
@@ -623,15 +647,19 @@ export default function NiftyChart() {
         return
       }
 
-      // cursor tool: select a drawing, move the replay head, or pan
+      // Picking the replay start consumes the click — afterwards clicks pan
+      // normally, matching TradingView (the head only moves via the controls).
+      if (replayRef.current.active && replayRef.current.picking) {
+        const i = idxAt(e.clientX)
+        if (i != null) setReplay((r) => ({ ...r, at: i, picking: false, playing: false }))
+        return
+      }
+
+      // cursor tool: select a drawing, or pan
       const hit = hitTest(e)
       setSelected(hit)
       if (hit) return
 
-      if (replayRef.current.active) {
-        const i = idxAt(e.clientX)
-        if (i != null) setReplay((r) => ({ ...r, at: i, playing: false }))
-      }
       drag = { x: e.clientX, start: viewRef.current.start }
       try {
         el.setPointerCapture?.(e.pointerId)
@@ -747,7 +775,7 @@ export default function NiftyChart() {
   }, [])
 
   useEffect(() => {
-    if (!replay.active || !replay.playing || !data) return
+    if (!replay.active || replay.picking || !replay.playing || !data) return
     const id = setInterval(() => {
       setReplay((r) => (r.at >= data.count - 1 ? { ...r, playing: false } : { ...r, at: r.at + 1 }))
     }, replay.ms)
@@ -755,7 +783,7 @@ export default function NiftyChart() {
   }, [replay.active, replay.playing, replay.ms, data])
 
   useEffect(() => {
-    if (!replay.active || !data) return
+    if (!replay.active || replay.picking || !data) return
     setView((v) => {
       const target = replay.at
       const rightEdge = v.start + v.count - 1
@@ -771,11 +799,11 @@ export default function NiftyChart() {
   function toggleReplay() {
     if (!data) return
     if (replay.active) {
-      setReplay((r) => ({ ...r, active: false, playing: false }))
+      setReplay((r) => ({ ...r, active: false, playing: false, picking: false }))
       setView((v) => ({ ...v, start: Math.max(0, data.count - v.count) }))
     } else {
       const at = Math.max(0, Math.min(data.count - 1, Math.round(view.start + view.count * 0.35)))
-      setReplay((r) => ({ ...r, active: true, playing: false, at }))
+      setReplay((r) => ({ ...r, active: true, playing: false, picking: true, at }))
     }
   }
 
@@ -896,15 +924,23 @@ export default function NiftyChart() {
       {replay.active && data && (
         <div className="ch-replay">
           <div className="ch-replay-controls">
-            <button onClick={() => stepReplay(-1)} title="Previous candle">⏮</button>
+            <button
+              className={`pick ${replay.picking ? 'active' : ''}`}
+              onClick={() => setReplay((r) => ({ ...r, picking: true, playing: false }))}
+              title="Choose a new start bar"
+            >
+              ⊢
+            </button>
+            <button onClick={() => stepReplay(-1)} title="Previous candle" disabled={replay.picking}>⏮</button>
             <button
               className="play"
               onClick={() => setReplay((r) => ({ ...r, playing: !r.playing }))}
               title="Play / pause (space)"
+              disabled={replay.picking}
             >
               {replay.playing ? '⏸' : '▶'}
             </button>
-            <button onClick={() => stepReplay(1)} title="Next candle">⏭</button>
+            <button onClick={() => stepReplay(1)} title="Next candle" disabled={replay.picking}>⏭</button>
           </div>
 
           <div className="ch-speeds">
@@ -925,6 +961,7 @@ export default function NiftyChart() {
             min={0}
             max={Math.max(0, data.count - 1)}
             value={replay.at}
+            disabled={replay.picking}
             onChange={(e) => setReplay((r) => ({ ...r, at: +e.target.value, playing: false }))}
           />
           <span className="ch-replay-pos">
