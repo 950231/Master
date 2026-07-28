@@ -317,6 +317,16 @@
 .ch-zoom button:hover {
   background: var(--panel-2);
 }
+.ch-zoom button.accent {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.ch-zoom-label {
+  color: var(--text-faint);
+  font-size: 14px;
+  padding: 0 2px 0 6px;
+  align-self: center;
+}
 .ch-hint {
   font-size: 12px;
   color: var(--text-faint);

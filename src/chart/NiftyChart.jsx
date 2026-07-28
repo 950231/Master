@@ -108,6 +108,10 @@ export default function NiftyChart() {
   // `picking` is the TradingView-style 'choose your start bar' phase.
   const [replay, setReplay] = useState({ active: false, at: 0, playing: false, ms: 500, picking: false })
 
+  // Price scale: `zoom` multiplies the auto-fitted span, `offset` shifts it.
+  // auto=true keeps the classic fit-to-visible-candles behaviour.
+  const [priceScale, setPriceScale] = useState({ zoom: 1, offset: 0, auto: true })
+
   const [tool, setTool] = useState('cursor')
   const [drawings, setDrawings] = useState([])
   const [pending, setPending] = useState(null) // in-progress drawing
@@ -122,11 +126,13 @@ export default function NiftyChart() {
   const dataRef = useRef(data)
   const replayRef = useRef(replay)
   const toolRef = useRef(tool)
+  const priceScaleRef = useRef(priceScale)
   const pendingRef = useRef(pending)
   useEffect(() => void (viewRef.current = view), [view])
   useEffect(() => void (dataRef.current = data), [data])
   useEffect(() => void (replayRef.current = replay), [replay])
   useEffect(() => void (toolRef.current = tool), [tool])
+  useEffect(() => void (priceScaleRef.current = priceScale), [priceScale])
   useEffect(() => void (pendingRef.current = pending), [pending])
 
   const storeKey = `nifty.drawings.${tf}${tf === '5m' ? '.' + year : ''}`
@@ -159,6 +165,7 @@ export default function NiftyChart() {
         const count = Math.min(200, d.count)
         setView({ start: Math.max(0, d.count - count), count })
         setReplay((r) => ({ ...r, active: false, playing: false, picking: false, at: 0 }))
+        setPriceScale({ zoom: 1, offset: 0, auto: true })
         setLoading(false)
       })
       .catch((e) => {
@@ -250,6 +257,11 @@ export default function NiftyChart() {
     const span = hi - lo || 1
     lo -= span * 0.06
     hi += span * 0.06
+    // Manual vertical zoom/pan expands or shifts the auto-fitted range.
+    const mid = (lo + hi) / 2 + priceScale.offset
+    const half = ((hi - lo) / 2) * priceScale.zoom
+    lo = mid - half
+    hi = mid + half
     const yOf = (p) => PAD.t + ((hi - p) / (hi - lo)) * plotH
     const priceAt = (y) => hi - ((y - PAD.t) / plotH) * (hi - lo)
     const idxAtX = (x) => Math.round(view.start + (x - PAD.l - barW / 2) / barW)
@@ -596,7 +608,7 @@ export default function NiftyChart() {
         ctx.fillText(tLabel, bx + 6, axisY + 12)
       }
     }
-  }, [data, view, cursor, tf, ma20, ma50, replay.active, replay.picking, revealEnd, drawings, pending, selected])
+  }, [data, view, cursor, tf, ma20, ma50, replay.active, replay.picking, revealEnd, drawings, pending, selected, priceScale])
 
   useEffect(() => draw(), [draw])
 
@@ -626,6 +638,9 @@ export default function NiftyChart() {
       return { x: e.clientX - r.left, y: e.clientY - r.top }
     }
     const plotWidth = () => el.clientWidth - PAD.l - PAD.r
+    const plotHeight = () => el.clientHeight - PAD.t - PAD.b
+    const overPriceAxis = (clientX) =>
+      clientX - el.getBoundingClientRect().left > PAD.l + plotWidth()
 
     const idxAt = (clientX) => {
       const d = dataRef.current
@@ -717,6 +732,7 @@ export default function NiftyChart() {
 
     let drag = null
     let drawing = null
+    let yZoom = null
     const pointers = new Map()
     let pinch = null
 
@@ -735,6 +751,17 @@ export default function NiftyChart() {
         return
       }
       if (pointers.size > 2) return
+
+      // Dragging the price gutter scales the Y axis (TradingView behaviour).
+      if (overPriceAxis(e.clientX)) {
+        yZoom = { y: e.clientY, zoom: priceScaleRef.current.zoom }
+        try {
+          el.setPointerCapture?.(e.pointerId)
+        } catch {
+          /* ignore */
+        }
+        return
+      }
 
       const activeTool = toolRef.current
 
@@ -771,7 +798,12 @@ export default function NiftyChart() {
       setSelected(hit)
       if (hit) return
 
-      drag = { x: e.clientX, start: viewRef.current.start }
+      drag = {
+        x: e.clientX,
+        y: e.clientY,
+        start: viewRef.current.start,
+        offset: priceScaleRef.current.offset,
+      }
       try {
         el.setPointerCapture?.(e.pointerId)
       } catch {
@@ -798,6 +830,15 @@ export default function NiftyChart() {
         return
       }
 
+      if (yZoom) {
+        e.preventDefault()
+        // Drag down = zoom out (wider price range), drag up = zoom in.
+        const factor = 1 + (e.clientY - yZoom.y) / 200
+        const zoom = Math.max(0.05, Math.min(20, yZoom.zoom * factor))
+        setPriceScale((ps) => ({ ...ps, zoom, auto: false }))
+        return
+      }
+
       const { x, y } = local(e)
       setCursor({ i: idxAt(e.clientX), price: scaleRef.current?.priceAt(y), x, y })
 
@@ -819,11 +860,22 @@ export default function NiftyChart() {
       const v = viewRef.current
       const dxBars = ((e.clientX - drag.x) / plotWidth()) * v.count
       setView({ start: clampStart(drag.start - dxBars, v.count), count: v.count })
+
+      // Vertical drag pans the price scale; the first such move drops auto-fit.
+      const dyPx = e.clientY - drag.y
+      if (Math.abs(dyPx) > 2) {
+        const sc = scaleRef.current
+        if (sc) {
+          const perPx = (sc.hi - sc.lo) / plotHeight()
+          setPriceScale((ps) => ({ ...ps, offset: drag.offset + dyPx * perPx, auto: false }))
+        }
+      }
     }
 
     const endPointer = (e) => {
       pointers.delete(e.pointerId)
       if (pointers.size < 2) pinch = null
+      yZoom = null
       if (drawing) {
         const done = drawing
         drawing = null
@@ -853,12 +905,18 @@ export default function NiftyChart() {
 
     const onLeave = () => setCursor(null)
 
+    // Double-clicking the price axis restores auto-fit.
+    const onDblClick = (e) => {
+      if (overPriceAxis(e.clientX)) setPriceScale({ zoom: 1, offset: 0, auto: true })
+    }
+
     el.addEventListener('pointerdown', onPointerDown)
     el.addEventListener('pointermove', onPointerMove, { passive: false })
     el.addEventListener('pointerup', endPointer)
     el.addEventListener('pointercancel', endPointer)
     el.addEventListener('pointerleave', onLeave)
     el.addEventListener('wheel', onWheel, { passive: false })
+    el.addEventListener('dblclick', onDblClick)
     return () => {
       el.removeEventListener('pointerdown', onPointerDown)
       el.removeEventListener('pointermove', onPointerMove)
@@ -866,6 +924,7 @@ export default function NiftyChart() {
       el.removeEventListener('pointercancel', endPointer)
       el.removeEventListener('pointerleave', onLeave)
       el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('dblclick', onDblClick)
     }
   }, [])
 
@@ -1108,12 +1167,34 @@ export default function NiftyChart() {
 
       <div className="ch-footer">
         <div className="ch-zoom">
-          <button onClick={() => zoomBtn(1 / 1.4)}>＋</button>
-          <button onClick={() => zoomBtn(1.4)}>−</button>
+          <span className="ch-zoom-label">↔</span>
+          <button onClick={() => zoomBtn(1 / 1.4)} title="Zoom in (time)">＋</button>
+          <button onClick={() => zoomBtn(1.4)} title="Zoom out (time)">−</button>
+          <span className="ch-zoom-label">↕</span>
           <button
+            title="Zoom in (price)"
             onClick={() =>
-              data && setView({ start: Math.max(0, data.count - 200), count: Math.min(200, data.count) })
+              setPriceScale((ps) => ({ ...ps, zoom: Math.max(0.05, ps.zoom / 1.3), auto: false }))
             }
+          >
+            ＋
+          </button>
+          <button
+            title="Zoom out (price)"
+            onClick={() =>
+              setPriceScale((ps) => ({ ...ps, zoom: Math.min(20, ps.zoom * 1.3), auto: false }))
+            }
+          >
+            −
+          </button>
+          <button
+            className={priceScale.auto ? '' : 'accent'}
+            title="Reset zoom and auto-fit the price scale"
+            onClick={() => {
+              setPriceScale({ zoom: 1, offset: 0, auto: true })
+              if (data)
+                setView({ start: Math.max(0, data.count - 200), count: Math.min(200, data.count) })
+            }}
           >
             Reset
           </button>
@@ -1124,7 +1205,7 @@ export default function NiftyChart() {
             : replay.active
               ? 'Tap a candle to jump · space = play/pause · ← → step'
               : data
-                ? `${data.count.toLocaleString('en-IN')} bars · drag to pan · pinch/scroll to zoom`
+                ? `${data.count.toLocaleString('en-IN')} bars · drag to pan · pinch/scroll to zoom · drag the price axis for vertical zoom`
                 : ''}
         </span>
       </div>
