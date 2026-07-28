@@ -29,6 +29,9 @@ const TOOLS = [
   { id: 'hline', icon: '─', name: 'Horizontal line' },
   { id: 'rect', icon: '▭', name: 'Rectangle' },
   { id: 'fib', icon: '≡', name: 'Fib retracement' },
+  { id: 'arrow', icon: '↗', name: 'Arrow' },
+  { id: 'brush', icon: '✎', name: 'Free draw' },
+  { id: 'measure', icon: '📏', name: 'Measure' },
 ]
 
 const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]
@@ -69,6 +72,21 @@ function sma(closes, period) {
     if (i >= period - 1) out[i] = sum / period
   }
   return out
+}
+
+/** Human-readable gap between two bar timestamps, e.g. "2h 15m" or "3d". */
+function fmtSpan(sec) {
+  const a = Math.abs(sec)
+  if (a < 3600) return `${Math.round(a / 60)}m`
+  if (a < 86400) {
+    const h = Math.floor(a / 3600)
+    const m = Math.round((a % 3600) / 60)
+    return m ? `${h}h ${m}m` : `${h}h`
+  }
+  const d = Math.floor(a / 86400)
+  if (d < 30) return `${d}d`
+  const mo = Math.floor(d / 30)
+  return mo < 12 ? `${mo}mo` : `${(d / 365).toFixed(1)}y`
 }
 
 const cssVar = (name, fallback) =>
@@ -395,6 +413,79 @@ export default function NiftyChart() {
         ctx.moveTo(x1, y1)
         ctx.lineTo(x2, y2)
         ctx.stroke()
+      } else if (d.type === 'arrow') {
+        ctx.beginPath()
+        ctx.moveTo(x1, y1)
+        ctx.lineTo(x2, y2)
+        ctx.stroke()
+        // arrowhead at the end point
+        const ang = Math.atan2(y2 - y1, x2 - x1)
+        const head = 11
+        ctx.beginPath()
+        ctx.moveTo(x2, y2)
+        ctx.lineTo(x2 - head * Math.cos(ang - Math.PI / 7), y2 - head * Math.sin(ang - Math.PI / 7))
+        ctx.lineTo(x2 - head * Math.cos(ang + Math.PI / 7), y2 - head * Math.sin(ang + Math.PI / 7))
+        ctx.closePath()
+        ctx.fillStyle = color
+        ctx.fill()
+      } else if (d.type === 'brush') {
+        const pts = d.points || []
+        if (pts.length > 1) {
+          ctx.beginPath()
+          ctx.lineJoin = 'round'
+          ctx.lineCap = 'round'
+          ctx.moveTo(xOf(pts[0].i), yOf(pts[0].price))
+          for (let k = 1; k < pts.length; k++) ctx.lineTo(xOf(pts[k].i), yOf(pts[k].price))
+          ctx.stroke()
+        }
+      } else if (d.type === 'measure') {
+        const rising = (d.p2?.price ?? d.p1.price) >= d.p1.price
+        const mc = rising ? up : down
+        const rx = Math.min(x1, x2)
+        const ry = Math.min(y1, y2)
+        const rw = Math.abs(x2 - x1)
+        const rh = Math.abs(y2 - y1)
+        ctx.fillStyle = mc + '22'
+        ctx.fillRect(rx, ry, rw, rh)
+        ctx.strokeStyle = mc
+        ctx.strokeRect(rx, ry, rw, rh)
+
+        // direction arrow down the middle
+        const mx = (x1 + x2) / 2
+        ctx.beginPath()
+        ctx.moveTo(mx, y1)
+        ctx.lineTo(mx, y2)
+        ctx.stroke()
+        const ang = y2 >= y1 ? Math.PI / 2 : -Math.PI / 2
+        const head = 9
+        ctx.beginPath()
+        ctx.moveTo(mx, y2)
+        ctx.lineTo(mx - head * Math.cos(ang - Math.PI / 7), y2 - head * Math.sin(ang - Math.PI / 7))
+        ctx.lineTo(mx - head * Math.cos(ang + Math.PI / 7), y2 - head * Math.sin(ang + Math.PI / 7))
+        ctx.closePath()
+        ctx.fillStyle = mc
+        ctx.fill()
+
+        // readout: price change, %, bar count and elapsed time
+        const dp = (d.p2?.price ?? d.p1.price) - d.p1.price
+        const pct = d.p1.price ? (dp / d.p1.price) * 100 : 0
+        const bars = Math.abs((d.p2?.i ?? d.p1.i) - d.p1.i)
+        const ia = Math.max(0, Math.min(data.count - 1, d.p1.i))
+        const ib = Math.max(0, Math.min(data.count - 1, d.p2?.i ?? d.p1.i))
+        const l1 = `${dp >= 0 ? '+' : ''}${fmtPrice(dp)}  (${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%)`
+        const l2 = `${bars} bars · ${fmtSpan(data.t[ib] - data.t[ia])}`
+        ctx.font = 'bold 12px system-ui, sans-serif'
+        const bw = Math.max(ctx.measureText(l1).width, ctx.measureText(l2).width) + 16
+        const bx = Math.min(Math.max(PAD.l, mx - bw / 2), PAD.l + plotW - bw)
+        const by = (y2 >= y1 ? ry + rh + 6 : ry - 44)
+        ctx.fillStyle = mc
+        ctx.fillRect(bx, by, bw, 38)
+        ctx.fillStyle = '#04121d'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(l1, bx + 8, by + 12)
+        ctx.font = '11px system-ui, sans-serif'
+        ctx.fillText(l2, bx + 8, by + 27)
+        ctx.font = '11px system-ui, sans-serif'
       } else if (d.type === 'rect') {
         ctx.fillStyle = color + '22'
         ctx.fillRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1))
@@ -590,11 +681,28 @@ export default function NiftyChart() {
         if (!d.p2) continue
         const x2 = s.xOf(d.p2.i)
         const y2 = s.yOf(d.p2.price)
-        if (d.type === 'rect' || d.type === 'fib') {
+        if (d.type === 'brush') {
+          const pts = d.points || []
+          let hit = false
+          for (let q = 1; q < pts.length && !hit; q++) {
+            const ax = s.xOf(pts[q - 1].i)
+            const ay = s.yOf(pts[q - 1].price)
+            const bx2 = s.xOf(pts[q].i)
+            const by2 = s.yOf(pts[q].price)
+            const dx = bx2 - ax
+            const dy = by2 - ay
+            const len2 = dx * dx + dy * dy || 1
+            const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / len2))
+            if (Math.hypot(x - (ax + t * dx), y - (ay + t * dy)) <= near) hit = true
+          }
+          if (hit) return d.id
+          continue
+        }
+        if (d.type === 'rect' || d.type === 'fib' || d.type === 'measure') {
           const inX = x >= Math.min(x1, x2) - near && x <= Math.max(x1, x2) + near
           const inY = y >= Math.min(y1, y2) - near && y <= Math.max(y1, y2) + near
           if (inX && inY) return d.id
-        } else if (d.type === 'trend') {
+        } else if (d.type === 'trend' || d.type === 'arrow') {
           const dx = x2 - x1
           const dy = y2 - y1
           const len2 = dx * dx + dy * dy || 1
@@ -635,6 +743,9 @@ export default function NiftyChart() {
         if (!p) return
         if (activeTool === 'hline') {
           setDrawings((ds) => [...ds, { id: uid(), type: 'hline', p1: p, color: cssVar('--accent', '#38bdf8') }])
+        } else if (activeTool === 'brush') {
+          drawing = { id: uid(), type: 'brush', p1: p, p2: p, points: [p], color: cssVar('--accent', '#38bdf8') }
+          setPending(drawing)
         } else {
           drawing = { id: uid(), type: activeTool, p1: p, p2: p, color: cssVar('--accent', '#38bdf8') }
           setPending(drawing)
@@ -694,7 +805,10 @@ export default function NiftyChart() {
         e.preventDefault()
         const p = pointAt(e)
         if (p) {
-          drawing = { ...drawing, p2: p }
+          drawing =
+            drawing.type === 'brush'
+              ? { ...drawing, p2: p, points: [...drawing.points, p] }
+              : { ...drawing, p2: p }
           setPending(drawing)
         }
         return
@@ -717,9 +831,12 @@ export default function NiftyChart() {
         // Discard accidental taps that produced a zero-size shape.
         const s = scaleRef.current
         const tiny =
-          s && Math.abs(s.xOf(done.p2.i) - s.xOf(done.p1.i)) < 4 &&
+          done.type !== 'brush' &&
+          s &&
+          Math.abs(s.xOf(done.p2.i) - s.xOf(done.p1.i)) < 4 &&
           Math.abs(s.yOf(done.p2.price) - s.yOf(done.p1.price)) < 4
-        if (!tiny) setDrawings((ds) => [...ds, done])
+        const emptyStroke = done.type === 'brush' && (done.points?.length ?? 0) < 2
+        if (!tiny && !emptyStroke) setDrawings((ds) => [...ds, done])
       }
       if (pointers.size === 0) drag = null
       try {

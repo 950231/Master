@@ -139,8 +139,13 @@
 .ch-canvas-wrap.tool-trend,
 .ch-canvas-wrap.tool-hline,
 .ch-canvas-wrap.tool-rect,
-.ch-canvas-wrap.tool-fib {
+.ch-canvas-wrap.tool-fib,
+.ch-canvas-wrap.tool-arrow,
+.ch-canvas-wrap.tool-measure {
   cursor: copy;
+}
+.ch-canvas-wrap.tool-brush {
+  cursor: cell;
 }
 
 /* ---------- Replay bar ---------- */
