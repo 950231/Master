@@ -30,6 +30,13 @@ const APPS = [
     desc: '10 years of NIFTY 50 candles — zoom, pan, and switch timeframes.',
     accent: 'blue',
   },
+  {
+    href: '#/orb',
+    icon: '🎯',
+    title: '5-Min ORB Practice',
+    desc: 'Practise the opening-range breakout: take trades on replay and score them.',
+    accent: 'green',
+  },
 ]
 
 export default function Home() {

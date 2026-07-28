@@ -4,6 +4,7 @@ import JournalApp from './App.jsx'
 import SudokuApp from './sudoku/SudokuApp.jsx'
 import ExamApp from './exam/ExamApp.jsx'
 import NiftyChart from './chart/NiftyChart.jsx'
+import OrbPractice from './practice/OrbPractice.jsx'
 
 // Tiny hash-based router — works cleanly on GitHub Pages project subpaths
 // (only the URL fragment changes, never the path) with no extra dependencies.
@@ -27,5 +28,6 @@ export default function Root() {
   if (route === 'sudoku') return <SudokuApp />
   if (route === 'exam') return <ExamApp />
   if (route === 'chart') return <NiftyChart />
+  if (route === 'orb') return <OrbPractice />
   return <Home />
 }
