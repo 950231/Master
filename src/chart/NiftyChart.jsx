@@ -23,26 +23,43 @@ const SPEEDS = [
   { label: '10×', ms: 40 },
 ]
 
+const TOOLS = [
+  { id: 'cursor', icon: '✛', name: 'Cursor / pan' },
+  { id: 'trend', icon: '╱', name: 'Trend line' },
+  { id: 'hline', icon: '─', name: 'Horizontal line' },
+  { id: 'rect', icon: '▭', name: 'Rectangle' },
+  { id: 'fib', icon: '≡', name: 'Fib retracement' },
+]
+
+const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]
+
 const MIN_BARS = 20
 const MAX_BARS = 3000
-const PAD = { l: 8, r: 68, t: 12, b: 26 }
+// Right gutter holds the price axis; bottom strip holds the time axis.
+const PAD = { l: 8, r: 72, t: 12, b: 30 }
 
 const fmtPrice = (p) =>
   p.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-function fmtDate(epochSec, tf) {
-  // Bars are IST wall-clock; render them back in IST regardless of viewer TZ.
+/** Bars are IST wall-clock; render them back in IST regardless of viewer TZ. */
+function istParts(epochSec) {
   const d = new Date((epochSec + 5.5 * 3600) * 1000)
-  const dd = String(d.getUTCDate()).padStart(2, '0')
-  const mo = d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })
-  const yr = d.getUTCFullYear()
-  if (tf === '1d' || tf === '1w') return `${dd} ${mo} ${yr}`
-  const hh = String(d.getUTCHours()).padStart(2, '0')
-  const mi = String(d.getUTCMinutes()).padStart(2, '0')
-  return `${dd} ${mo} ${yr}, ${hh}:${mi}`
+  return {
+    dd: String(d.getUTCDate()).padStart(2, '0'),
+    mon: d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }),
+    yr: d.getUTCFullYear(),
+    hh: String(d.getUTCHours()).padStart(2, '0'),
+    mi: String(d.getUTCMinutes()).padStart(2, '0'),
+    dayKey: Math.floor((epochSec + 5.5 * 3600) / 86400),
+  }
 }
 
-/** Simple moving average over closes; null until enough history. */
+function fmtDate(epochSec, tf) {
+  const p = istParts(epochSec)
+  if (tf === '1d' || tf === '1w') return `${p.dd} ${p.mon} ${p.yr}`
+  return `${p.dd} ${p.mon} ${p.yr}, ${p.hh}:${p.mi}`
+}
+
 function sma(closes, period) {
   const out = new Array(closes.length).fill(null)
   let sum = 0
@@ -57,6 +74,8 @@ function sma(closes, period) {
 const cssVar = (name, fallback) =>
   getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
 
+const uid = () => `d${Date.now()}${Math.random().toString(36).slice(2, 7)}`
+
 export default function NiftyChart() {
   const [tf, setTf] = useState('1d')
   const [year, setYear] = useState(null)
@@ -67,22 +86,31 @@ export default function NiftyChart() {
   const [showMA, setShowMA] = useState(true)
 
   const [view, setView] = useState({ start: 0, count: 200 })
-  const [cursor, setCursor] = useState(null)
-
-  // Replay: `at` is the index of the last revealed candle.
+  const [cursor, setCursor] = useState(null) // {i, price, x, y}
   const [replay, setReplay] = useState({ active: false, at: 0, playing: false, ms: 500 })
+
+  const [tool, setTool] = useState('cursor')
+  const [drawings, setDrawings] = useState([])
+  const [pending, setPending] = useState(null) // in-progress drawing
+  const [selected, setSelected] = useState(null)
 
   const canvasRef = useRef(null)
   const wrapRef = useRef(null)
+  const scaleRef = useRef(null) // screen<->data mapping produced by draw()
 
-  // Mirrors of state for use inside native (non-React) event listeners, which
-  // would otherwise capture stale values.
+  // Mirrors for native listeners, which would otherwise close over stale state.
   const viewRef = useRef(view)
   const dataRef = useRef(data)
   const replayRef = useRef(replay)
+  const toolRef = useRef(tool)
+  const pendingRef = useRef(pending)
   useEffect(() => void (viewRef.current = view), [view])
   useEffect(() => void (dataRef.current = data), [data])
   useEffect(() => void (replayRef.current = replay), [replay])
+  useEffect(() => void (toolRef.current = tool), [tool])
+  useEffect(() => void (pendingRef.current = pending), [pending])
+
+  const storeKey = `nifty.drawings.${tf}${tf === '5m' ? '.' + year : ''}`
 
   useEffect(() => {
     fetch(`${BASE}nifty/index.json`)
@@ -124,10 +152,29 @@ export default function NiftyChart() {
     }
   }, [tf, year])
 
+  // Drawings are stored per timeframe so they stay anchored to the right bars.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(storeKey)
+      setDrawings(raw ? JSON.parse(raw) : [])
+    } catch {
+      setDrawings([])
+    }
+    setSelected(null)
+    setPending(null)
+  }, [storeKey])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(storeKey, JSON.stringify(drawings))
+    } catch {
+      /* storage full — keep them in memory */
+    }
+  }, [drawings, storeKey])
+
   const ma20 = useMemo(() => (data && showMA ? sma(data.c, 20) : null), [data, showMA])
   const ma50 = useMemo(() => (data && showMA ? sma(data.c, 50) : null), [data, showMA])
 
-  /** Last bar index that should be visible (replay hides the future). */
   const revealEnd = replay.active && data ? Math.min(data.count, replay.at + 1) : data?.count ?? 0
 
   // ---------------- drawing ----------------
@@ -155,11 +202,13 @@ export default function NiftyChart() {
 
     const start = Math.max(0, Math.floor(view.start))
     const end = Math.min(revealEnd, start + view.count)
-    const drawN = end - start
-    const slotN = view.count // keep bar width stable even when replay hides bars
+    const slotN = view.count
 
     const grid = cssVar('--border', '#1e293b')
+    const gridLight = cssVar('--border-light', '#263449')
     const text = cssVar('--text-faint', '#64748b')
+    const textStrong = cssVar('--text', '#e2e8f0')
+    const panel = cssVar('--bg-elevated', '#0f172a')
     const up = cssVar('--green', '#22c55e')
     const down = cssVar('--red', '#ef4444')
     const accent = cssVar('--accent', '#38bdf8')
@@ -182,38 +231,76 @@ export default function NiftyChart() {
     lo -= span * 0.06
     hi += span * 0.06
     const yOf = (p) => PAD.t + ((hi - p) / (hi - lo)) * plotH
+    const priceAt = (y) => hi - ((y - PAD.t) / plotH) * (hi - lo)
+    const idxAtX = (x) => Math.round(view.start + (x - PAD.l - barW / 2) / barW)
 
-    // grid + price axis
-    ctx.strokeStyle = grid
-    ctx.fillStyle = text
-    ctx.lineWidth = 1
+    scaleRef.current = { start, end, barW, lo, hi, plotW, plotH, xOf, yOf, priceAt, idxAtX, w, h }
+
+    // ---- price grid + axis ----
     ctx.font = '11px system-ui, sans-serif'
+    ctx.lineWidth = 1
     ctx.textBaseline = 'middle'
     for (let i = 0; i <= 6; i++) {
       const p = lo + ((hi - lo) * i) / 6
       const y = Math.round(yOf(p)) + 0.5
+      ctx.strokeStyle = grid
       ctx.beginPath()
       ctx.moveTo(PAD.l, y)
       ctx.lineTo(PAD.l + plotW, y)
       ctx.stroke()
-      ctx.fillText(fmtPrice(p), PAD.l + plotW + 6, y)
+      ctx.fillStyle = text
+      ctx.fillText(fmtPrice(p), PAD.l + plotW + 8, y)
     }
 
-    // time axis — switch to clock times once the window is under ~2 days
-    ctx.textBaseline = 'top'
-    const spanSec = drawN > 1 ? data.t[end - 1] - data.t[start] : 0
+    // ---- time axis: labels sized to fit, with day breaks called out ----
     const intraday = tf !== '1d' && tf !== '1w'
-    const useClock = intraday && spanSec < 2 * 86400
-    const every = Math.max(1, Math.floor(slotN / 6))
-    for (let i = start; i < end; i += every) {
+    const axisY = PAD.t + plotH
+    ctx.strokeStyle = gridLight
+    ctx.beginPath()
+    ctx.moveTo(PAD.l, axisY + 0.5)
+    ctx.lineTo(PAD.l + plotW, axisY + 0.5)
+    ctx.stroke()
+
+    ctx.textBaseline = 'top'
+    const minGapPx = 62
+    const step = Math.max(1, Math.ceil(minGapPx / barW))
+    let prevDay = end > start ? istParts(data.t[Math.max(start - 1, 0)]).dayKey : null
+    // Track the last drawn label so ticks can never overlap — on daily bars
+    // every candle is a new day, so day breaks alone are not a safe anchor.
+    let lastLabelX = -Infinity
+    for (let i = start; i < end; i++) {
+      const p = istParts(data.t[i])
+      const newDay = p.dayKey !== prevDay
+      prevDay = p.dayKey
+      // Day boundaries are preferred anchors on intraday charts; otherwise
+      // fall back to a regular step.
+      const candidate = (intraday && newDay) || (i - start) % step === 0
+      if (!candidate) continue
+
       const x = xOf(i)
-      const full = fmtDate(data.t[i], tf)
-      const label = useClock ? (full.split(', ')[1] ?? full) : full.split(',')[0]
+      if (x < PAD.l + 12 || x > PAD.l + plotW - 12) continue
+      if (x - lastLabelX < minGapPx) continue
+      lastLabelX = x
+
+      const label = !intraday
+        ? `${p.dd} ${p.mon}`
+        : newDay
+          ? `${p.dd} ${p.mon}`
+          : `${p.hh}:${p.mi}`
+
+      // vertical grid line + tick
+      ctx.strokeStyle = newDay && intraday ? gridLight : grid
+      ctx.beginPath()
+      ctx.moveTo(Math.round(x) + 0.5, PAD.t)
+      ctx.lineTo(Math.round(x) + 0.5, axisY + 4)
+      ctx.stroke()
+
+      ctx.fillStyle = newDay && intraday ? textStrong : text
       const tw = ctx.measureText(label).width
-      if (x - tw / 2 > PAD.l && x + tw / 2 < PAD.l + plotW) ctx.fillText(label, x - tw / 2, PAD.t + plotH + 6)
+      ctx.fillText(label, x - tw / 2, axisY + 7)
     }
 
-    // candles
+    // ---- candles ----
     const bodyW = Math.max(1, Math.min(barW * 0.7, 14))
     const thin = barW < 3
     for (let i = start; i < end; i++) {
@@ -234,7 +321,7 @@ export default function NiftyChart() {
       }
     }
 
-    // moving averages
+    // ---- moving averages ----
     const drawMA = (series, color) => {
       if (!series) return
       ctx.strokeStyle = color
@@ -254,7 +341,99 @@ export default function NiftyChart() {
     drawMA(ma20, accent)
     drawMA(ma50, '#f59e0b')
 
-    // replay edge marker — the "now" line
+    // ---- last price line + tag (TradingView-style) ----
+    if (end > start) {
+      const li = end - 1
+      const lp = data.c[li]
+      const ly = yOf(lp)
+      const rising = lp >= data.o[li]
+      const col = rising ? up : down
+      ctx.strokeStyle = col
+      ctx.setLineDash([2, 3])
+      ctx.beginPath()
+      ctx.moveTo(PAD.l, ly)
+      ctx.lineTo(PAD.l + plotW, ly)
+      ctx.stroke()
+      ctx.setLineDash([])
+      const label = fmtPrice(lp)
+      const tw = ctx.measureText(label).width
+      ctx.fillStyle = col
+      ctx.fillRect(PAD.l + plotW + 2, ly - 9, tw + 12, 18)
+      ctx.fillStyle = '#04121d'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(label, PAD.l + plotW + 8, ly)
+    }
+
+    // ---- user drawings ----
+    const all = pending ? [...drawings, pending] : drawings
+    for (const d of all) {
+      const isSel = d.id === selected
+      const color = d.color || accent
+      ctx.strokeStyle = color
+      ctx.lineWidth = isSel ? 2.5 : 1.5
+      const x1 = xOf(d.p1.i)
+      const y1 = yOf(d.p1.price)
+      const x2 = d.p2 ? xOf(d.p2.i) : x1
+      const y2 = d.p2 ? yOf(d.p2.price) : y1
+
+      if (d.type === 'hline') {
+        ctx.beginPath()
+        ctx.moveTo(PAD.l, y1)
+        ctx.lineTo(PAD.l + plotW, y1)
+        ctx.stroke()
+        const label = fmtPrice(d.p1.price)
+        const tw = ctx.measureText(label).width
+        ctx.fillStyle = color
+        ctx.fillRect(PAD.l + plotW + 2, y1 - 9, tw + 12, 18)
+        ctx.fillStyle = '#04121d'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(label, PAD.l + plotW + 8, y1)
+      } else if (d.type === 'trend') {
+        ctx.beginPath()
+        ctx.moveTo(x1, y1)
+        ctx.lineTo(x2, y2)
+        ctx.stroke()
+      } else if (d.type === 'rect') {
+        ctx.fillStyle = color + '22'
+        ctx.fillRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1))
+        ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1))
+      } else if (d.type === 'fib') {
+        const pTop = Math.max(d.p1.price, d.p2?.price ?? d.p1.price)
+        const pBot = Math.min(d.p1.price, d.p2?.price ?? d.p1.price)
+        const xa = Math.min(x1, x2)
+        const xb = Math.max(x1, x2)
+        ctx.textBaseline = 'bottom'
+        FIB_LEVELS.forEach((lv, k) => {
+          const price = pTop - (pTop - pBot) * lv
+          const y = yOf(price)
+          ctx.strokeStyle = k === 0 || k === FIB_LEVELS.length - 1 ? color : color + 'aa'
+          ctx.setLineDash(k === 0 || k === FIB_LEVELS.length - 1 ? [] : [4, 4])
+          ctx.beginPath()
+          ctx.moveTo(xa, y)
+          ctx.lineTo(Math.max(xb, xa + 40), y)
+          ctx.stroke()
+          ctx.setLineDash([])
+          ctx.fillStyle = color
+          ctx.fillText(`${(lv * 100).toFixed(1)}%  ${fmtPrice(price)}`, xa + 4, y - 2)
+        })
+        ctx.textBaseline = 'middle'
+      }
+
+      if (isSel && d.p2) {
+        ctx.fillStyle = color
+        for (const [hx, hy] of [
+          [x1, y1],
+          [x2, y2],
+        ]) {
+          ctx.beginPath()
+          ctx.arc(hx, hy, 4, 0, Math.PI * 2)
+          ctx.fill()
+        }
+      }
+      ctx.lineWidth = 1
+    }
+
+    // ---- replay "now" marker ----
     if (replay.active && end > start) {
       const x = xOf(end - 1) + barW / 2
       ctx.strokeStyle = accent
@@ -266,18 +445,43 @@ export default function NiftyChart() {
       ctx.setLineDash([])
     }
 
-    // crosshair
-    if (cursor != null && cursor >= start && cursor < end) {
-      const x = xOf(cursor)
+    // ---- crosshair with axis tags ----
+    if (cursor && cursor.x != null) {
+      const cx = Math.max(PAD.l, Math.min(PAD.l + plotW, cursor.x))
+      const cy = Math.max(PAD.t, Math.min(PAD.t + plotH, cursor.y))
       ctx.strokeStyle = text
       ctx.setLineDash([4, 4])
       ctx.beginPath()
-      ctx.moveTo(x, PAD.t)
-      ctx.lineTo(x, PAD.t + plotH)
+      ctx.moveTo(cx, PAD.t)
+      ctx.lineTo(cx, PAD.t + plotH)
+      ctx.moveTo(PAD.l, cy)
+      ctx.lineTo(PAD.l + plotW, cy)
       ctx.stroke()
       ctx.setLineDash([])
+
+      // price tag on the right axis
+      const pLabel = fmtPrice(priceAt(cy))
+      const pw = ctx.measureText(pLabel).width
+      ctx.fillStyle = gridLight
+      ctx.fillRect(PAD.l + plotW + 2, cy - 9, pw + 12, 18)
+      ctx.fillStyle = textStrong
+      ctx.textBaseline = 'middle'
+      ctx.fillText(pLabel, PAD.l + plotW + 8, cy)
+
+      // time tag on the bottom axis
+      if (cursor.i != null && cursor.i >= 0 && cursor.i < data.count) {
+        const p = istParts(data.t[cursor.i])
+        const tLabel = intraday ? `${p.dd} ${p.mon} ${p.hh}:${p.mi}` : `${p.dd} ${p.mon} ${p.yr}`
+        const tw = ctx.measureText(tLabel).width
+        const bx = Math.max(PAD.l, Math.min(cx - tw / 2 - 6, PAD.l + plotW - tw - 12))
+        ctx.fillStyle = gridLight
+        ctx.fillRect(bx, axisY + 3, tw + 12, 18)
+        ctx.fillStyle = textStrong
+        ctx.textBaseline = 'middle'
+        ctx.fillText(tLabel, bx + 6, axisY + 12)
+      }
     }
-  }, [data, view, cursor, tf, ma20, ma50, replay.active, revealEnd])
+  }, [data, view, cursor, tf, ma20, ma50, replay.active, revealEnd, drawings, pending, selected])
 
   useEffect(() => draw(), [draw])
 
@@ -294,23 +498,29 @@ export default function NiftyChart() {
   }, [draw])
 
   // ---------------- interaction ----------------
-  // Native listeners (not React synthetic) so wheel/touch can call
-  // preventDefault, and refs so handlers never see stale view/data.
+  // Lets hit-testing read the latest drawings without re-binding listeners.
+  const drawingsRef = useRef(drawings)
+  useEffect(() => void (drawingsRef.current = drawings), [drawings])
+
   useEffect(() => {
     const el = wrapRef.current
     if (!el) return
 
+    const local = (e) => {
+      const r = el.getBoundingClientRect()
+      return { x: e.clientX - r.left, y: e.clientY - r.top }
+    }
     const plotWidth = () => el.clientWidth - PAD.l - PAD.r
 
     const idxAt = (clientX) => {
       const d = dataRef.current
-      if (!d) return null
-      const rect = el.getBoundingClientRect()
-      const rel = clientX - rect.left - PAD.l
-      const pw = plotWidth()
-      if (rel < 0 || rel > pw) return null
+      const s = scaleRef.current
+      if (!d || !s) return null
+      const r = el.getBoundingClientRect()
+      const rel = clientX - r.left - PAD.l
+      if (rel < 0 || rel > s.plotW) return null
       const v = viewRef.current
-      return Math.max(0, Math.min(d.count - 1, Math.floor(v.start + (rel / pw) * v.count)))
+      return Math.max(0, Math.min(d.count - 1, Math.floor(v.start + (rel / s.plotW) * v.count)))
     }
 
     const clampStart = (start, count) => {
@@ -331,15 +541,59 @@ export default function NiftyChart() {
       setView({ start: clampStart(anchor - ratio * count, count), count })
     }
 
+    /** Data-space point under the pointer, for creating/moving drawings. */
+    const pointAt = (e) => {
+      const s = scaleRef.current
+      if (!s) return null
+      const { x, y } = local(e)
+      return { i: s.idxAtX(x), price: s.priceAt(y) }
+    }
+
+    /** Hit-test existing drawings so a tap can select one. */
+    const hitTest = (e) => {
+      const s = scaleRef.current
+      if (!s) return null
+      const { x, y } = local(e)
+      const near = 7
+      for (let k = drawingsRef.current.length - 1; k >= 0; k--) {
+        const d = drawingsRef.current[k]
+        const x1 = s.xOf(d.p1.i)
+        const y1 = s.yOf(d.p1.price)
+        if (d.type === 'hline') {
+          if (Math.abs(y - y1) <= near) return d.id
+          continue
+        }
+        if (!d.p2) continue
+        const x2 = s.xOf(d.p2.i)
+        const y2 = s.yOf(d.p2.price)
+        if (d.type === 'rect' || d.type === 'fib') {
+          const inX = x >= Math.min(x1, x2) - near && x <= Math.max(x1, x2) + near
+          const inY = y >= Math.min(y1, y2) - near && y <= Math.max(y1, y2) + near
+          if (inX && inY) return d.id
+        } else if (d.type === 'trend') {
+          const dx = x2 - x1
+          const dy = y2 - y1
+          const len2 = dx * dx + dy * dy || 1
+          const t = Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / len2))
+          const px = x1 + t * dx
+          const py = y1 + t * dy
+          if (Math.hypot(x - px, y - py) <= near) return d.id
+        }
+      }
+      return null
+    }
+
     let drag = null
+    let drawing = null
     const pointers = new Map()
     let pinch = null
 
     const onPointerDown = (e) => {
       pointers.set(e.pointerId, e)
       if (pointers.size === 2) {
-        // second finger down -> start pinch, cancel any pan
         drag = null
+        drawing = null
+        setPending(null)
         const [a, b] = [...pointers.values()]
         pinch = {
           dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1,
@@ -349,14 +603,36 @@ export default function NiftyChart() {
         return
       }
       if (pointers.size > 2) return
-      // In replay mode a tap sets the replay position instead of panning.
-      if (replayRef.current.active && e.shiftKey !== true) {
+
+      const activeTool = toolRef.current
+
+      if (activeTool !== 'cursor') {
+        const p = pointAt(e)
+        if (!p) return
+        if (activeTool === 'hline') {
+          setDrawings((ds) => [...ds, { id: uid(), type: 'hline', p1: p, color: cssVar('--accent', '#38bdf8') }])
+        } else {
+          drawing = { id: uid(), type: activeTool, p1: p, p2: p, color: cssVar('--accent', '#38bdf8') }
+          setPending(drawing)
+        }
+        try {
+          el.setPointerCapture?.(e.pointerId)
+        } catch {
+          /* ignore */
+        }
+        return
+      }
+
+      // cursor tool: select a drawing, move the replay head, or pan
+      const hit = hitTest(e)
+      setSelected(hit)
+      if (hit) return
+
+      if (replayRef.current.active) {
         const i = idxAt(e.clientX)
         if (i != null) setReplay((r) => ({ ...r, at: i, playing: false }))
       }
-      drag = { x: e.clientX, start: viewRef.current.start, moved: false }
-      // Capture can throw for synthetic/already-released pointers; a failed
-      // capture just means we fall back to normal event bubbling.
+      drag = { x: e.clientX, start: viewRef.current.start }
       try {
         el.setPointerCapture?.(e.pointerId)
       } catch {
@@ -383,19 +659,40 @@ export default function NiftyChart() {
         return
       }
 
-      setCursor(idxAt(e.clientX))
+      const { x, y } = local(e)
+      setCursor({ i: idxAt(e.clientX), price: scaleRef.current?.priceAt(y), x, y })
+
+      if (drawing) {
+        e.preventDefault()
+        const p = pointAt(e)
+        if (p) {
+          drawing = { ...drawing, p2: p }
+          setPending(drawing)
+        }
+        return
+      }
 
       if (!drag) return
       e.preventDefault()
       const v = viewRef.current
       const dxBars = ((e.clientX - drag.x) / plotWidth()) * v.count
-      if (Math.abs(e.clientX - drag.x) > 2) drag.moved = true
       setView({ start: clampStart(drag.start - dxBars, v.count), count: v.count })
     }
 
     const endPointer = (e) => {
       pointers.delete(e.pointerId)
       if (pointers.size < 2) pinch = null
+      if (drawing) {
+        const done = drawing
+        drawing = null
+        setPending(null)
+        // Discard accidental taps that produced a zero-size shape.
+        const s = scaleRef.current
+        const tiny =
+          s && Math.abs(s.xOf(done.p2.i) - s.xOf(done.p1.i)) < 4 &&
+          Math.abs(s.yOf(done.p2.price) - s.yOf(done.p1.price)) < 4
+        if (!tiny) setDrawings((ds) => [...ds, done])
+      }
       if (pointers.size === 0) drag = null
       try {
         el.releasePointerCapture?.(e.pointerId)
@@ -440,44 +737,33 @@ export default function NiftyChart() {
   }
 
   // ---------------- replay engine ----------------
-  const stepReplay = useCallback(
-    (delta) => {
-      const d = dataRef.current
-      if (!d) return
-      setReplay((r) => {
-        const at = Math.max(0, Math.min(d.count - 1, r.at + delta))
-        return { ...r, at, playing: at >= d.count - 1 ? false : r.playing }
-      })
-    },
-    [],
-  )
+  const stepReplay = useCallback((delta) => {
+    const d = dataRef.current
+    if (!d) return
+    setReplay((r) => {
+      const at = Math.max(0, Math.min(d.count - 1, r.at + delta))
+      return { ...r, at, playing: at >= d.count - 1 ? false : r.playing }
+    })
+  }, [])
 
-  // Advance one candle per tick while playing.
   useEffect(() => {
     if (!replay.active || !replay.playing || !data) return
     const id = setInterval(() => {
-      setReplay((r) => {
-        if (r.at >= data.count - 1) return { ...r, playing: false }
-        return { ...r, at: r.at + 1 }
-      })
+      setReplay((r) => (r.at >= data.count - 1 ? { ...r, playing: false } : { ...r, at: r.at + 1 }))
     }, replay.ms)
     return () => clearInterval(id)
   }, [replay.active, replay.playing, replay.ms, data])
 
-  // Keep the replay edge in view as it advances.
   useEffect(() => {
     if (!replay.active || !data) return
     setView((v) => {
       const target = replay.at
       const rightEdge = v.start + v.count - 1
       if (target > rightEdge - 2) {
-        // scroll so the newest candle sits ~75% across the viewport
         const start = Math.max(0, Math.min(data.count - v.count, Math.round(target - v.count * 0.75)))
         return start === v.start ? v : { ...v, start }
       }
-      if (target < v.start) {
-        return { ...v, start: Math.max(0, Math.round(target - v.count * 0.25)) }
-      }
+      if (target < v.start) return { ...v, start: Math.max(0, Math.round(target - v.count * 0.25)) }
       return v
     })
   }, [replay.at, replay.active, data])
@@ -488,16 +774,26 @@ export default function NiftyChart() {
       setReplay((r) => ({ ...r, active: false, playing: false }))
       setView((v) => ({ ...v, start: Math.max(0, data.count - v.count) }))
     } else {
-      // Start a bit into the current window so there is context on the left.
       const at = Math.max(0, Math.min(data.count - 1, Math.round(view.start + view.count * 0.35)))
       setReplay((r) => ({ ...r, active: true, playing: false, at }))
     }
   }
 
-  // Keyboard shortcuts: space = play/pause, arrows = step.
+  // Keyboard: space play/pause, arrows step, delete removes selection, esc cancels tool.
   useEffect(() => {
-    if (!replay.active) return
     const onKey = (e) => {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
+        e.preventDefault()
+        setDrawings((ds) => ds.filter((d) => d.id !== selected))
+        setSelected(null)
+        return
+      }
+      if (e.key === 'Escape') {
+        setTool('cursor')
+        setSelected(null)
+        return
+      }
+      if (!replay.active) return
       if (e.key === ' ') {
         e.preventDefault()
         setReplay((r) => ({ ...r, playing: !r.playing }))
@@ -511,12 +807,10 @@ export default function NiftyChart() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [replay.active, stepReplay])
+  }, [replay.active, stepReplay, selected])
 
-  // ---------------- readout ----------------
   const lastVisible = revealEnd - 1
-  const hovered =
-    data && cursor != null && cursor <= lastVisible && cursor >= 0 ? cursor : null
+  const hovered = data && cursor?.i != null && cursor.i <= lastVisible && cursor.i >= 0 ? cursor.i : null
   const readIdx = hovered ?? (lastVisible >= 0 ? lastVisible : null)
   const change = data && readIdx > 0 ? data.c[readIdx] - data.c[readIdx - 1] : 0
   const changePct =
@@ -560,6 +854,43 @@ export default function NiftyChart() {
         <button className={`ch-toggle replay ${replay.active ? 'active' : ''}`} onClick={toggleReplay}>
           ⏵ Replay
         </button>
+      </div>
+
+      <div className="ch-tools">
+        {TOOLS.map((t) => (
+          <button
+            key={t.id}
+            className={`ch-tool ${tool === t.id ? 'active' : ''}`}
+            onClick={() => setTool(t.id)}
+            title={t.name}
+          >
+            <span className="ch-tool-icon">{t.icon}</span>
+          </button>
+        ))}
+        <span className="ch-tool-sep" />
+        <button
+          className="ch-tool"
+          title="Delete selected"
+          disabled={!selected}
+          onClick={() => {
+            setDrawings((ds) => ds.filter((d) => d.id !== selected))
+            setSelected(null)
+          }}
+        >
+          🗑
+        </button>
+        <button
+          className="ch-tool"
+          title="Clear all drawings"
+          disabled={!drawings.length}
+          onClick={() => {
+            setDrawings([])
+            setSelected(null)
+          }}
+        >
+          Clear
+        </button>
+        {drawings.length > 0 && <span className="ch-tool-count">{drawings.length}</span>}
       </div>
 
       {replay.active && data && (
@@ -615,7 +946,7 @@ export default function NiftyChart() {
         </div>
       )}
 
-      <div className="ch-canvas-wrap" ref={wrapRef}>
+      <div className={`ch-canvas-wrap tool-${tool}`} ref={wrapRef}>
         <canvas ref={canvasRef} />
         {loading && <div className="ch-overlay">Loading candles…</div>}
         {error && <div className="ch-overlay error">Could not load data ({error})</div>}
@@ -634,11 +965,13 @@ export default function NiftyChart() {
           </button>
         </div>
         <span className="ch-hint">
-          {replay.active
-            ? 'Tap a candle to jump · space = play/pause · ← → step'
-            : data
-              ? `${data.count.toLocaleString('en-IN')} bars · drag to pan · pinch/scroll to zoom`
-              : ''}
+          {tool !== 'cursor'
+            ? `${TOOLS.find((t) => t.id === tool).name} — drag on the chart · Esc to cancel`
+            : replay.active
+              ? 'Tap a candle to jump · space = play/pause · ← → step'
+              : data
+                ? `${data.count.toLocaleString('en-IN')} bars · drag to pan · pinch/scroll to zoom`
+                : ''}
         </span>
       </div>
     </div>
