@@ -112,6 +112,23 @@ export default function NiftyChart() {
   // auto=true keeps the classic fit-to-visible-candles behaviour.
   const [priceScale, setPriceScale] = useState({ zoom: 1, offset: 0, auto: true })
 
+  // Paper trading during replay: one open position plus a log of closed ones.
+  const [pos, setPos] = useState(null)
+  const [tradeLog, setTradeLog] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('nifty.replayTrades.v1') || '[]')
+    } catch {
+      return []
+    }
+  })
+  const [risk, setRisk] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('nifty.replayRisk.v1') || '{"pts":30,"r":2}')
+    } catch {
+      return { pts: 30, r: 2 }
+    }
+  })
+
   const [tool, setTool] = useState('cursor')
   const [drawings, setDrawings] = useState([])
   const [pending, setPending] = useState(null) // in-progress drawing
@@ -127,12 +144,14 @@ export default function NiftyChart() {
   const replayRef = useRef(replay)
   const toolRef = useRef(tool)
   const priceScaleRef = useRef(priceScale)
+  const posRef = useRef(pos)
   const pendingRef = useRef(pending)
   useEffect(() => void (viewRef.current = view), [view])
   useEffect(() => void (dataRef.current = data), [data])
   useEffect(() => void (replayRef.current = replay), [replay])
   useEffect(() => void (toolRef.current = tool), [tool])
   useEffect(() => void (priceScaleRef.current = priceScale), [priceScale])
+  useEffect(() => void (posRef.current = pos), [pos])
   useEffect(() => void (pendingRef.current = pending), [pending])
 
   const storeKey = `nifty.drawings.${tf}${tf === '5m' ? '.' + year : ''}`
@@ -197,6 +216,21 @@ export default function NiftyChart() {
       /* storage full — keep them in memory */
     }
   }, [drawings, storeKey])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('nifty.replayTrades.v1', JSON.stringify(tradeLog.slice(0, 300)))
+    } catch {
+      /* ignore */
+    }
+  }, [tradeLog])
+  useEffect(() => {
+    try {
+      localStorage.setItem('nifty.replayRisk.v1', JSON.stringify(risk))
+    } catch {
+      /* ignore */
+    }
+  }, [risk])
 
   const ma20 = useMemo(() => (data && showMA ? sma(data.c, 20) : null), [data, showMA])
   const ma50 = useMemo(() => (data && showMA ? sma(data.c, 50) : null), [data, showMA])
@@ -538,6 +572,45 @@ export default function NiftyChart() {
       ctx.lineWidth = 1
     }
 
+    // ---- open paper position: entry / stop / target ----
+    if (pos) {
+      const rows = [
+        [pos.entry, accent, 'Entry'],
+        [pos.sl, down, 'SL'],
+      ]
+      if (pos.tp != null) rows.push([pos.tp, up, 'Target'])
+      for (const [p, col, tag] of rows) {
+        const y = yOf(p)
+        ctx.strokeStyle = col
+        ctx.setLineDash([3, 3])
+        ctx.beginPath()
+        ctx.moveTo(PAD.l, y)
+        ctx.lineTo(PAD.l + plotW, y)
+        ctx.stroke()
+        ctx.setLineDash([])
+        const label = `${tag} ${fmtPrice(p)}`
+        const tw = ctx.measureText(label).width
+        ctx.fillStyle = col
+        ctx.fillRect(PAD.l + 2, y - 8, tw + 10, 16)
+        ctx.fillStyle = '#04121d'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(label, PAD.l + 7, y)
+      }
+      // entry arrow on the bar the trade was taken
+      if (pos.entryIdx >= start && pos.entryIdx < end) {
+        const x = xOf(pos.entryIdx)
+        const y = yOf(pos.entry)
+        ctx.fillStyle = pos.side === 'long' ? up : down
+        ctx.beginPath()
+        const s2 = pos.side === 'long' ? 1 : -1
+        ctx.moveTo(x, y)
+        ctx.lineTo(x - 6, y + 12 * s2)
+        ctx.lineTo(x + 6, y + 12 * s2)
+        ctx.closePath()
+        ctx.fill()
+      }
+    }
+
     // ---- replay start-picker: red line that follows the cursor ----
     if (replay.active && replay.picking && cursor?.x != null) {
       const cx = Math.max(PAD.l, Math.min(PAD.l + plotW, cursor.x))
@@ -608,7 +681,7 @@ export default function NiftyChart() {
         ctx.fillText(tLabel, bx + 6, axisY + 12)
       }
     }
-  }, [data, view, cursor, tf, ma20, ma50, replay.active, replay.picking, revealEnd, drawings, pending, selected, priceScale])
+  }, [data, view, cursor, tf, ma20, ma50, replay.active, replay.picking, revealEnd, drawings, pending, selected, priceScale, pos])
 
   useEffect(() => draw(), [draw])
 
@@ -972,6 +1045,95 @@ export default function NiftyChart() {
     })
   }, [replay.at, replay.active, data])
 
+  /** Points and R for a position given an exit price. */
+  const pnlOf = (p, exit) => {
+    const dir = p.side === 'long' ? 1 : -1
+    const points = (exit - p.entry) * dir
+    const riskPts = Math.abs(p.entry - p.sl)
+    return { points, r: riskPts ? points / riskPts : 0 }
+  }
+
+  const closePosition = useCallback(
+    (exit, reason, atIdx) => {
+      setPos((p) => {
+        if (!p || !data) return null
+        const { points, r } = pnlOf(p, exit)
+        const closed = {
+          id: `${p.entryIdx}-${Date.now()}`,
+          tf,
+          year: tf === '5m' ? year : null,
+          side: p.side,
+          entry: p.entry,
+          sl: p.sl,
+          tp: p.tp,
+          exit,
+          reason,
+          points,
+          r,
+          entryTime: fmtDate(data.t[p.entryIdx], tf),
+          exitTime: fmtDate(data.t[Math.min(atIdx, data.count - 1)], tf),
+        }
+        setTradeLog((log) => [closed, ...log].slice(0, 300))
+        return null
+      })
+    },
+    [data, tf, year],
+  )
+
+  function openPosition(side) {
+    if (!data || !replay.active || replay.picking || pos) return
+    const i = replay.at
+    const entry = data.c[i]
+    const pts = Math.max(0.05, Number(risk.pts) || 0)
+    const sl = side === 'long' ? entry - pts : entry + pts
+    const tp = risk.r > 0 ? (side === 'long' ? entry + pts * risk.r : entry - pts * risk.r) : null
+    setPos({ side, entry, sl, tp, entryIdx: i })
+  }
+
+  // Resolve the open position against each newly revealed candle.
+  useEffect(() => {
+    if (!pos || !data || !replay.active || replay.picking) return
+    const i = replay.at
+    if (i <= pos.entryIdx) return
+    const hitSl = pos.side === 'long' ? data.l[i] <= pos.sl : data.h[i] >= pos.sl
+    const hitTp = pos.tp != null && (pos.side === 'long' ? data.h[i] >= pos.tp : data.l[i] <= pos.tp)
+    // A candle covering both is resolved as the stop — the pessimistic read,
+    // since OHLC cannot say which level traded first.
+    if (hitSl) closePosition(pos.sl, 'sl', i)
+    else if (hitTp) closePosition(pos.tp, 'target', i)
+  }, [replay.at, pos, data, replay.active, replay.picking, closePosition])
+
+  // Leaving replay or changing dataset closes any open paper trade.
+  useEffect(() => {
+    if (!replay.active && pos && data) closePosition(data.c[replay.at], 'manual', replay.at)
+  }, [replay.active]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const livePnl = pos && data ? pnlOf(pos, data.c[replay.at]) : null
+
+  const tradeStats = useMemo(() => {
+    const t = tradeLog
+    if (!t.length) return { n: 0, winRate: 0, points: 0, totalR: 0, avgR: 0, wins: 0, losses: 0 }
+    let wins = 0
+    let losses = 0
+    let points = 0
+    let totalR = 0
+    for (const x of t) {
+      if (x.r > 0) wins++
+      else if (x.r < 0) losses++
+      points += x.points
+      totalR += x.r
+    }
+    return {
+      n: t.length,
+      wins,
+      losses,
+      winRate: (wins / t.length) * 100,
+      points,
+      totalR,
+      avgR: totalR / t.length,
+    }
+  }, [tradeLog])
+
   function toggleReplay() {
     if (!data) return
     if (replay.active) {
@@ -1144,6 +1306,114 @@ export default function NiftyChart() {
             {(replay.at + 1).toLocaleString('en-IN')} / {data.count.toLocaleString('en-IN')}
           </span>
         </div>
+      )}
+
+      {replay.active && !replay.picking && data && (
+        <div className="ch-trade">
+          <div className="ch-trade-risk">
+            <label>
+              SL pts
+              <input
+                type="number"
+                min="0.05"
+                step="1"
+                value={risk.pts}
+                disabled={!!pos}
+                onChange={(e) => setRisk((r) => ({ ...r, pts: +e.target.value }))}
+              />
+            </label>
+            <label>
+              Target
+              <select
+                value={risk.r}
+                disabled={!!pos}
+                onChange={(e) => setRisk((r) => ({ ...r, r: +e.target.value }))}
+              >
+                <option value={1}>1R</option>
+                <option value={1.5}>1.5R</option>
+                <option value={2}>2R</option>
+                <option value={3}>3R</option>
+                <option value={0}>No target</option>
+              </select>
+            </label>
+          </div>
+
+          {!pos ? (
+            <div className="ch-trade-actions">
+              <button className="buy" onClick={() => openPosition('long')}>▲ BUY</button>
+              <button className="sell" onClick={() => openPosition('short')}>▼ SELL</button>
+            </div>
+          ) : (
+            <>
+              <div className={`ch-trade-open ${livePnl.points >= 0 ? 'win' : 'loss'}`}>
+                <b>{pos.side === 'long' ? 'LONG' : 'SHORT'}</b>
+                <span>@ {fmtPrice(pos.entry)}</span>
+                <span>SL {fmtPrice(pos.sl)}</span>
+                {pos.tp != null && <span>TP {fmtPrice(pos.tp)}</span>}
+                <b className="ch-trade-pnl">
+                  {livePnl.points >= 0 ? '+' : ''}{fmtPrice(livePnl.points)} pts ·{' '}
+                  {livePnl.r >= 0 ? '+' : ''}{livePnl.r.toFixed(2)}R
+                </b>
+              </div>
+              <button
+                className="ch-trade-close"
+                onClick={() => closePosition(data.c[replay.at], 'manual', replay.at)}
+              >
+                ✕ Close
+              </button>
+            </>
+          )}
+
+          <div className="ch-trade-stats">
+            <span><b>{tradeStats.n}</b> trades</span>
+            <span><b>{tradeStats.winRate.toFixed(0)}%</b> win</span>
+            <span className={tradeStats.points >= 0 ? 'tone-pos' : 'tone-neg'}>
+              <b>{tradeStats.points >= 0 ? '+' : ''}{fmtPrice(tradeStats.points)}</b> pts
+            </span>
+            <span className={tradeStats.totalR >= 0 ? 'tone-pos' : 'tone-neg'}>
+              <b>{tradeStats.totalR >= 0 ? '+' : ''}{tradeStats.totalR.toFixed(1)}R</b>
+            </span>
+            {tradeLog.length > 0 && (
+              <button
+                className="ch-trade-clear"
+                onClick={() => window.confirm('Clear replay trade history?') && setTradeLog([])}
+              >
+                clear
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {replay.active && !replay.picking && tradeLog.length > 0 && (
+        <details className="ch-tradelog">
+          <summary>Trade history ({tradeLog.length})</summary>
+          <div className="ch-tradelog-wrap">
+            <table>
+              <thead>
+                <tr><th>Side</th><th>In</th><th>Out</th><th className="num">Entry</th><th className="num">Exit</th><th className="num">Pts</th><th className="num">R</th><th>Why</th></tr>
+              </thead>
+              <tbody>
+                {tradeLog.map((t) => (
+                  <tr key={t.id}>
+                    <td><span className={`side ${t.side}`}>{t.side}</span></td>
+                    <td>{t.entryTime}</td>
+                    <td>{t.exitTime}</td>
+                    <td className="num">{fmtPrice(t.entry)}</td>
+                    <td className="num">{fmtPrice(t.exit)}</td>
+                    <td className={`num ${t.points >= 0 ? 'tone-pos' : 'tone-neg'}`}>
+                      {t.points >= 0 ? '+' : ''}{fmtPrice(t.points)}
+                    </td>
+                    <td className={`num ${t.r >= 0 ? 'tone-pos' : 'tone-neg'}`}>
+                      {t.r >= 0 ? '+' : ''}{t.r.toFixed(2)}
+                    </td>
+                    <td>{t.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
       )}
 
       {data && readIdx != null && readIdx >= 0 && (
