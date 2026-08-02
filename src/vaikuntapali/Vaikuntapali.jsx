@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import {
   COLS,
   ROWS,
@@ -20,6 +25,9 @@ import {
   buildPawn,
   buildDie,
   dieRotationFor,
+  BAND_TITLE,
+  BAND_DEITY,
+  BAND_FOOT,
   SNAKE_SKINS,
   LADDER_WOODS,
 } from './scene.js'
@@ -41,8 +49,14 @@ const ease = (t) => t * t * (3 - 2 * t)
  * toward the action and drifts back to the middle once it is over.
  */
 const LEAN = 0.42
+
+// The printed bands sit beyond the grid, so the sheet's centre is not the
+// grid's centre and the camera has to allow for both.
+const SHEET_DEPTH = ROWS + BAND_TITLE + BAND_DEITY + BAND_FOOT
+const SHEET_Z = (-(BAND_TITLE + BAND_DEITY) + BAND_FOOT) / 2
+
 function aim(s, x, z) {
-  s.wantTarget.set(x * LEAN, 0, z * LEAN)
+  s.wantTarget.set(x * LEAN, 0, SHEET_Z + (z - SHEET_Z) * LEAN)
 }
 
 /**
@@ -57,22 +71,22 @@ function aim(s, x, z) {
  */
 function fitDistance(camera, polar) {
   const halfW = (COLS + 1) / 2
-  const halfD = (ROWS + 1) / 2
+  const halfD = (SHEET_DEPTH + 0.9) / 2
   const tanV = Math.tan(((camera.fov * Math.PI) / 180) / 2)
   const tanH = tanV * camera.aspect
   const needH = halfW / tanH
   const needV = (halfD * Math.max(0.35, Math.sin(polar))) / tanV
   // Perspective magnifies the near edge of the board more than this flat
   // estimate allows for, so the result is padded rather than taken literally.
-  return Math.max(needH, needV) * 1.32
+  return Math.max(needH, needV) * 1.28
 }
 
 /** Where a pawn stands, nudged so several on one square stay visible. */
 function pawnSpot(square, seat, count) {
   if (square < 1) {
-    // Waiting just off the near corner, close enough to stay in frame.
-    const p = squareToPos(1, TILE)
-    return new THREE.Vector3(p.x - 0.55 - seat * 0.42, 0, p.z + 0.95)
+    // Waiting on the printed border below the grid, where they stay in
+    // frame and on the sheet instead of hanging off the corner.
+    return new THREE.Vector3(-3.2 + seat * 1.5, 0, ROWS / 2 + BAND_FOOT / 2)
   }
   const p = squareToPos(square, TILE)
   if (count <= 1) return new THREE.Vector3(p.x, 0, p.z)
@@ -114,23 +128,38 @@ export default function Vaikuntapali() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
     renderer.shadowMap.enabled = true
     renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    // Filmic tone mapping keeps the bright printed colours from clipping to
+    // flat blocks the way the default linear mapping does.
+    renderer.toneMapping = THREE.ACESFilmicToneMapping
+    renderer.toneMappingExposure = 1.0
     mount.appendChild(renderer.domElement)
 
-    scene.add(new THREE.HemisphereLight('#cfe4ff', '#3b2a1a', 1.15))
-    const sun = new THREE.DirectionalLight('#fff6e5', 2.1)
+    // Image-based lighting. Without an environment, physical materials have
+    // nothing to reflect and the snakes read as matte plastic.
+    const pmrem = new THREE.PMREMGenerator(renderer)
+    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+    scene.environmentIntensity = 0.30
+
+    scene.add(new THREE.HemisphereLight('#cfe4ff', '#3b2a1a', 0.22))
+    const sun = new THREE.DirectionalLight('#fff6e5', 1.5)
     sun.position.set(7, 15, 8)
     sun.castShadow = true
-    sun.shadow.mapSize.set(1024, 1024)
-    const d = 11
+    sun.shadow.mapSize.set(2048, 2048)
+    sun.shadow.bias = -0.0006
+    sun.shadow.normalBias = 0.02
+    const d = 13
     sun.shadow.camera.left = -d
     sun.shadow.camera.right = d
     sun.shadow.camera.top = d
     sun.shadow.camera.bottom = -d
     sun.shadow.camera.far = 40
     scene.add(sun)
-    const rim = new THREE.PointLight('#a855f7', 60, 40)
+    const rim = new THREE.PointLight('#a855f7', 18, 40)
     rim.position.set(-9, 7, -10)
     scene.add(rim)
+    const fill = new THREE.DirectionalLight('#bcd4ff', 0.22)
+    fill.position.set(-8, 6, -6)
+    scene.add(fill)
 
     // A table under the board, so it reads as an object sitting somewhere
     // rather than a slab floating in a void.
@@ -179,7 +208,9 @@ export default function Vaikuntapali() {
     })
 
     const dieMesh = buildDie()
-    dieMesh.position.set(COLS / 2 + 1.15, 0.9, ROWS / 2 - 0.6)
+    // On the printed border rather than floating beside the board, so it is
+    // inside the framed area in both orientations.
+    dieMesh.position.set(4.1, 0.9, ROWS / 2 + BAND_FOOT / 2)
     scene.add(dieMesh)
 
     S.current = {
@@ -194,19 +225,29 @@ export default function Vaikuntapali() {
       action: null,
       clock: new THREE.Clock(),
       // `zoom` is the player's pinch multiplier on top of the fitted distance.
-      orbit: { az: 0, pol: 0.95, zoom: 1 },
-      target: new THREE.Vector3(0, 0, 0),
-      wantTarget: new THREE.Vector3(0, 0, 0),
+      orbit: { az: 0, pol: 1.12, zoom: 1 },
+      target: new THREE.Vector3(0, 0, SHEET_Z),
+      wantTarget: new THREE.Vector3(0, 0, SHEET_Z),
       positions: [0, 0, 0, 0],
       count: 2,
       onDone: null,
     }
+
+    // Bloom, so gilt edges and the winning square glow rather than sit flat.
+    const composer = new EffectComposer(renderer)
+    composer.addPass(new RenderPass(scene, camera))
+    const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.16, 0.7, 0.95)
+    composer.addPass(bloom)
+    composer.addPass(new OutputPass())
+    S.current.composer = composer
 
     const resize = () => {
       const w = mount.clientWidth
       const h = mount.clientHeight
       if (!w || !h) return
       renderer.setSize(w, h, false)
+      composer.setSize(w, h)
+      bloom.setSize(w, h)
       camera.aspect = w / h
       camera.updateProjectionMatrix()
     }
@@ -285,10 +326,10 @@ export default function Vaikuntapali() {
       })
 
       if (!s.action) {
-        s.dieMesh.position.y = 0.9 + Math.sin(now * 1.7) * 0.07
+        s.dieMesh.position.y = 0.85 + Math.sin(now * 1.7) * 0.06
         s.dieMesh.rotation.y += dt * 0.35
-        // Nothing is moving, so drift back to a view of the whole board.
-        s.wantTarget.set(0, 0, 0)
+        // Nothing is moving, so drift back to a view of the whole sheet.
+        s.wantTarget.set(0, 0, SHEET_Z)
       }
 
       // Camera orbits its target and eases toward whatever it should watch.
@@ -301,7 +342,7 @@ export default function Vaikuntapali() {
         s.target.z + Math.cos(o.az) * Math.cos(o.pol) * dist,
       )
       s.camera.lookAt(s.target)
-      s.renderer.render(s.scene, s.camera)
+      s.composer.render()
     }
     raf = requestAnimationFrame(loop)
 
@@ -313,6 +354,8 @@ export default function Vaikuntapali() {
       el.removeEventListener('pointerup', up)
       el.removeEventListener('pointercancel', up)
       el.removeEventListener('wheel', wheel)
+      composer.dispose()
+      pmrem.dispose()
       renderer.dispose()
       scene.traverse((o) => {
         if (o.geometry) o.geometry.dispose()
@@ -342,7 +385,7 @@ export default function Vaikuntapali() {
     if (a.kind === 'die') {
       const m = s.dieMesh
       if (t < 0.75) {
-        m.position.y = 0.9 + Math.abs(Math.sin(t * 12)) * 1.5
+        m.position.y = 0.85 + Math.abs(Math.sin(t * 12)) * 1.5
         m.rotation.x += dt * 15
         m.rotation.y += dt * 11
         m.rotation.z += dt * 9
@@ -350,7 +393,7 @@ export default function Vaikuntapali() {
         // Settle onto the face that was actually rolled.
         const e = dieRotationFor(a.value)
         const k = ease((t - 0.75) / 0.25)
-        m.position.y = 0.9 + (1 - k) * 0.4
+        m.position.y = 0.85 + (1 - k) * 0.4
         m.rotation.x = THREE.MathUtils.lerp(m.rotation.x % (Math.PI * 2), e.x, k)
         m.rotation.y = THREE.MathUtils.lerp(m.rotation.y % (Math.PI * 2), e.y, k)
         m.rotation.z = THREE.MathUtils.lerp(m.rotation.z % (Math.PI * 2), e.z, k)
@@ -436,7 +479,7 @@ export default function Vaikuntapali() {
       s.queue = []
       s.action = null
       placeAll([0, 0, 0, 0], n)
-      s.wantTarget.set(0, 0, 0)
+      s.wantTarget.set(0, 0, SHEET_Z)
       s.orbit.zoom = 1
     },
     [placeAll],

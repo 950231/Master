@@ -4,8 +4,72 @@
 
 import * as THREE from 'three'
 import { COLS, ROWS, TOTAL, squareToPos, NAMES, LADDERS, SNAKES } from './board.js'
+import { TITLE_ROW, ART, PALETTE } from './art.js'
 
 export const TILE = 1
+
+/** Depth of the decorative bands printed above and below the grid. */
+export const BAND_TITLE = 1.5
+export const BAND_DEITY = 1.0
+export const BAND_FOOT = 1.0
+
+/** Rounded rectangle path, used all over the printed artwork. */
+function roundRect(g, x, y, w, h, r) {
+  g.beginPath()
+  g.moveTo(x + r, y)
+  g.arcTo(x + w, y, x + w, y + h, r)
+  g.arcTo(x + w, y + h, x, y + h, r)
+  g.arcTo(x, y + h, x, y, r)
+  g.arcTo(x, y, x + w, y, r)
+  g.closePath()
+}
+
+function canvasTex(w, h, draw, repeatX = 1, repeatY = 1) {
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  draw(c.getContext('2d'), w, h)
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  t.anisotropy = 8
+  if (repeatX !== 1 || repeatY !== 1) {
+    t.wrapS = t.wrapT = THREE.RepeatWrapping
+    t.repeat.set(repeatX, repeatY)
+  }
+  return t
+}
+
+/**
+ * Turn a drawn greyscale image into a normal map, so painted detail such as
+ * snake scales and wood grain catches the light instead of looking flat.
+ */
+function normalFromHeight(w, h, draw, strength = 2.4, repeatX = 1, repeatY = 1) {
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  const g = c.getContext('2d')
+  draw(g, w, h)
+  const src = g.getImageData(0, 0, w, h)
+  const out = g.createImageData(w, h)
+  const at = (x, y) => src.data[((((y + h) % h) * w + ((x + w) % w)) << 2)] / 255
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const dx = (at(x + 1, y) - at(x - 1, y)) * strength
+      const dy = (at(x, y + 1) - at(x, y - 1)) * strength
+      const len = Math.hypot(dx, dy, 1)
+      const i = (y * w + x) << 2
+      out.data[i] = ((-dx / len) * 0.5 + 0.5) * 255
+      out.data[i + 1] = ((-dy / len) * 0.5 + 0.5) * 255
+      out.data[i + 2] = (1 / len) * 0.5 * 255 + 127
+      out.data[i + 3] = 255
+    }
+  }
+  g.putImageData(out, 0, 0)
+  const t = new THREE.CanvasTexture(c)
+  t.wrapS = t.wrapT = THREE.RepeatWrapping
+  t.repeat.set(repeatX, repeatY)
+  return t
+}
 
 /* ------------------------------------------------------------------ board */
 
@@ -16,13 +80,11 @@ export const TILE = 1
  * device's own font.
  */
 export function boardTexture() {
-  const px = 170 // per square
+  const px = 190 // pixels per square
   const c = document.createElement('canvas')
   c.width = COLS * px
   c.height = ROWS * px
   const g = c.getContext('2d')
-
-  const warm = ['#fde68a', '#fecaca', '#bbf7d0', '#bfdbfe', '#ddd6fe', '#fed7aa']
 
   for (let n = 1; n <= TOTAL; n++) {
     const i = n - 1
@@ -30,64 +92,89 @@ export function boardTexture() {
     const within = i % COLS
     const col = row % 2 === 0 ? within : COLS - 1 - within
     const x = col * px
-    // Canvas y grows downward while the board's row 0 is the bottom row.
+    // Canvas y grows downward, while row 0 is the bottom row of the board.
     const y = (ROWS - 1 - row) * px
 
-    g.fillStyle = warm[(row + col) % warm.length]
+    const wash = PALETTE[(row * 3 + col * 2) % PALETTE.length]
+    g.fillStyle = n === TOTAL ? '#fcd34d' : wash
     g.fillRect(x, y, px, px)
 
-    if (n === TOTAL) {
-      const grad = g.createLinearGradient(x, y, x + px, y + px)
-      grad.addColorStop(0, '#fbbf24')
-      grad.addColorStop(1, '#f59e0b')
-      g.fillStyle = grad
-      g.fillRect(x, y, px, px)
-    }
+    // Printed sheets show a fine white keyline inside a dark rule.
+    g.strokeStyle = 'rgba(255,255,255,0.75)'
+    g.lineWidth = 6
+    g.strokeRect(x + 5, y + 5, px - 10, px - 10)
+    g.strokeStyle = '#7c2d12'
+    g.lineWidth = 4
+    g.strokeRect(x + 2, y + 2, px - 4, px - 4)
 
-    g.strokeStyle = 'rgba(120,53,15,0.55)'
-    g.lineWidth = 3
-    g.strokeRect(x + 1.5, y + 1.5, px - 3, px - 3)
-
-    // A tinted corner flags squares that start a snake or a ladder, so the
-    // board reads correctly even before the 3D pieces are noticed.
-    if (LADDERS[n]) {
-      g.fillStyle = 'rgba(21,128,61,0.30)'
-      g.beginPath()
-      g.moveTo(x + px, y + px)
-      g.lineTo(x + px - 52, y + px)
-      g.lineTo(x + px, y + px - 52)
-      g.fill()
-    } else if (SNAKES[n]) {
-      g.fillStyle = 'rgba(190,18,60,0.30)'
-      g.beginPath()
-      g.moveTo(x + px, y + px)
-      g.lineTo(x + px - 52, y + px)
-      g.lineTo(x + px, y + px - 52)
-      g.fill()
-    }
-
-    g.fillStyle = '#431407'
-    g.font = `800 ${n === TOTAL ? 54 : 44}px system-ui, sans-serif`
-    g.textAlign = 'center'
-    g.textBaseline = 'middle'
-    g.fillText(String(n), x + px / 2, y + px / 2 - (NAMES[n] ? 14 : 0))
-
-    if (NAMES[n]) {
-      g.fillStyle = 'rgba(67,20,7,0.85)'
-      g.font = '500 21px system-ui, sans-serif'
-      const name = NAMES[n]
-      // Squeeze rather than clip: these names matter more than the layout.
-      const w = g.measureText(name).width
-      const max = px - 14
+    const letter = TITLE_ROW[n]
+    if (letter) {
+      // The top row carries the board's name, one letter to a square.
+      g.fillStyle = '#7f1d1d'
+      g.font = `900 ${Math.round(px * 0.62)}px system-ui, sans-serif`
+      g.textAlign = 'center'
+      g.textBaseline = 'middle'
+      g.fillText(letter, x + px / 2, y + px * 0.56)
+    } else if (ART[n]) {
+      g.font = `${Math.round(px * 0.5)}px system-ui, "Apple Color Emoji", sans-serif`
+      g.textAlign = 'center'
+      g.textBaseline = 'middle'
+      g.fillText(ART[n], x + px / 2, y + px * 0.52)
+    } else {
+      // A quiet lotus motif keeps unillustrated squares from looking bare.
       g.save()
-      if (w > max) {
-        g.translate(x + px / 2, y + px / 2 + 34)
-        g.scale(max / w, 1)
-        g.fillText(name, 0, 0)
-      } else {
-        g.fillText(name, x + px / 2, y + px / 2 + 34)
+      g.globalAlpha = 0.16
+      g.strokeStyle = '#7c2d12'
+      g.lineWidth = 3
+      for (let k = 0; k < 8; k++) {
+        g.beginPath()
+        g.ellipse(
+          x + px / 2, y + px * 0.52, px * 0.06, px * 0.16,
+          (k * Math.PI) / 4, 0, Math.PI * 2,
+        )
+        g.stroke()
       }
       g.restore()
+    }
+
+    // Number badge, top-left as on the sheet.
+    g.fillStyle = 'rgba(255,255,255,0.9)'
+    roundRect(g, x + 9, y + 9, px * 0.33, px * 0.2, 7)
+    g.fill()
+    g.strokeStyle = 'rgba(124,45,18,0.55)'
+    g.lineWidth = 2
+    g.stroke()
+    g.fillStyle = '#7c2d12'
+    g.font = `800 ${Math.round(px * 0.15)}px system-ui, sans-serif`
+    g.textAlign = 'center'
+    g.textBaseline = 'middle'
+    g.fillText(String(n), x + 9 + px * 0.165, y + 9 + px * 0.1)
+
+    if (NAMES[n]) {
+      g.fillStyle = '#5b1f0a'
+      g.font = `600 ${Math.round(px * 0.105)}px system-ui, sans-serif`
+      const name = NAMES[n]
+      const max = px - 20
+      const w = g.measureText(name).width
+      g.save()
+      g.translate(x + px / 2, y + px * 0.88)
+      if (w > max) g.scale(max / w, 1)
+      g.fillText(name, 0, 0)
+      g.restore()
+    }
+
+    // Green flag at a ladder foot, red at a snake head.
+    if (LADDERS[n] || SNAKES[n]) {
+      const up = !!LADDERS[n]
+      g.fillStyle = up ? '#15803d' : '#be123c'
+      g.beginPath()
+      g.moveTo(x + px, y + px)
+      g.lineTo(x + px - px * 0.26, y + px)
+      g.lineTo(x + px, y + px - px * 0.26)
+      g.fill()
+      g.fillStyle = '#fff'
+      g.font = `800 ${Math.round(px * 0.12)}px system-ui, sans-serif`
+      g.fillText(up ? '↑' + LADDERS[n] : '↓' + SNAKES[n], x + px * 0.83, y + px * 0.92)
     }
   }
 
@@ -97,70 +184,182 @@ export function boardTexture() {
   return tex
 }
 
+/** The yellow masthead printed above the grid. */
+function titleBandTexture() {
+  return canvasTex(2048, Math.round((2048 / COLS) * BAND_TITLE), (g, w, h) => {
+    const grad = g.createLinearGradient(0, 0, 0, h)
+    grad.addColorStop(0, '#fde047')
+    grad.addColorStop(1, '#facc15')
+    g.fillStyle = grad
+    g.fillRect(0, 0, w, h)
+    g.strokeStyle = '#b45309'
+    g.lineWidth = 10
+    g.strokeRect(5, 5, w - 10, h - 10)
+    g.textAlign = 'center'
+    g.textBaseline = 'middle'
+    g.fillStyle = '#dc2626'
+    g.font = `900 ${Math.round(h * 0.52)}px system-ui, sans-serif`
+    g.fillText('వైకుంఠపాళి', w / 2, h * 0.42)
+    g.fillStyle = '#7c2d12'
+    g.font = `700 ${Math.round(h * 0.17)}px system-ui, sans-serif`
+    g.fillText('పరమపద సోపానపథము', w / 2, h * 0.78)
+  })
+}
+
+/** Framed panels above the grid, echoing the sheet's picture strip. */
+function deityBandTexture() {
+  return canvasTex(2048, Math.round((2048 / COLS) * BAND_DEITY), (g, w, h) => {
+    g.fillStyle = '#fde68a'
+    g.fillRect(0, 0, w, h)
+    const n = COLS
+    const cw = w / n
+    for (let i = 0; i < n; i++) {
+      g.fillStyle = PALETTE[i % PALETTE.length]
+      roundRect(g, i * cw + 6, 6, cw - 12, h - 12, 10)
+      g.fill()
+      g.strokeStyle = '#b45309'
+      g.lineWidth = 5
+      g.stroke()
+      g.textAlign = 'center'
+      g.textBaseline = 'middle'
+      g.font = `${Math.round(h * 0.5)}px system-ui, "Apple Color Emoji", sans-serif`
+      g.fillText(i % 2 ? '🪷' : '🕉', i * cw + cw / 2, h / 2)
+    }
+  })
+}
+
+/** The elephant frieze along the bottom of the sheet. */
+function footBandTexture() {
+  return canvasTex(2048, Math.round((2048 / COLS) * BAND_FOOT), (g, w, h) => {
+    g.fillStyle = '#fde047'
+    g.fillRect(0, 0, w, h)
+    g.strokeStyle = '#b45309'
+    g.lineWidth = 8
+    g.strokeRect(4, 4, w - 8, h - 8)
+    g.textAlign = 'center'
+    g.textBaseline = 'middle'
+    g.font = `${Math.round(h * 0.62)}px system-ui, "Apple Color Emoji", sans-serif`
+    const n = 12
+    for (let i = 0; i < n; i++) g.fillText('🐘', ((i + 0.5) * w) / n, h * 0.55)
+  })
+}
+
 export function buildBoard() {
   const group = new THREE.Group()
 
-  const top = new THREE.Mesh(
-    new THREE.BoxGeometry(COLS * TILE, 0.35, ROWS * TILE),
-    [
-      new THREE.MeshStandardMaterial({ color: '#92400e', roughness: 0.9 }),
-      new THREE.MeshStandardMaterial({ color: '#92400e', roughness: 0.9 }),
-      new THREE.MeshStandardMaterial({ map: boardTexture(), roughness: 0.75 }),
-      new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.9 }),
-      new THREE.MeshStandardMaterial({ color: '#92400e', roughness: 0.9 }),
-      new THREE.MeshStandardMaterial({ color: '#92400e', roughness: 0.9 }),
-    ],
-  )
-  top.position.y = -0.175
-  top.receiveShadow = true
-  group.add(top)
+  const paper = new THREE.MeshStandardMaterial({ map: boardTexture(), roughness: 0.82 })
+  const edge = new THREE.MeshStandardMaterial({ color: '#8b3a0f', roughness: 0.75 })
 
-  // Raised rim, so the board reads as a physical object rather than a decal.
+  const grid = new THREE.Mesh(new THREE.BoxGeometry(COLS * TILE, 0.3, ROWS * TILE), [
+    edge, edge, paper, edge, edge, edge,
+  ])
+  grid.position.y = -0.15
+  grid.receiveShadow = true
+  group.add(grid)
+
+  // Printed bands sit beyond the grid, so the playing squares keep their
+  // coordinates and squareToPos stays the single source of truth.
+  const bands = [
+    [titleBandTexture(), BAND_TITLE, -(ROWS / 2) - BAND_DEITY - BAND_TITLE / 2],
+    [deityBandTexture(), BAND_DEITY, -(ROWS / 2) - BAND_DEITY / 2],
+    [footBandTexture(), BAND_FOOT, ROWS / 2 + BAND_FOOT / 2],
+  ]
+  for (const [map, depth, z] of bands) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(COLS * TILE, 0.3, depth), [
+      edge, edge, new THREE.MeshStandardMaterial({ map, roughness: 0.82 }), edge, edge, edge,
+    ])
+    m.position.set(0, -0.15, z)
+    m.receiveShadow = true
+    group.add(m)
+  }
+
+  const totalDepth = ROWS + BAND_TITLE + BAND_DEITY + BAND_FOOT
+  const zCentre = (-(BAND_TITLE + BAND_DEITY) + BAND_FOOT) / 2
   const rim = new THREE.Mesh(
-    new THREE.BoxGeometry(COLS * TILE + 0.7, 0.5, ROWS * TILE + 0.7),
-    new THREE.MeshStandardMaterial({ color: '#7c2d12', roughness: 0.7 }),
+    new THREE.BoxGeometry(COLS * TILE + 0.8, 0.55, totalDepth + 0.8),
+    new THREE.MeshStandardMaterial({ color: '#7c2d12', roughness: 0.55, metalness: 0.15 }),
   )
-  rim.position.y = -0.42
+  rim.position.set(0, -0.42, zCentre)
   rim.receiveShadow = true
   group.add(rim)
 
+  group.userData = { totalDepth, zCentre }
   return group
 }
 
 /* ------------------------------------------------------------------ snake */
 
-function snakeSkin(base, belly) {
-  const c = document.createElement('canvas')
-  c.width = 128
-  c.height = 128
-  const g = c.getContext('2d')
+/** Diamond-scale pattern, drawn once and reused as colour + relief. */
+function scalePattern(g, w, h, base, belly) {
   g.fillStyle = base
-  g.fillRect(0, 0, 128, 128)
-  // Diamond scales.
-  g.fillStyle = belly
-  for (let y = 0; y < 128; y += 16) {
-    for (let x = 0; x < 128; x += 16) {
+  g.fillRect(0, 0, w, h)
+  // Overlapping rounded scales in offset rows, the way they lie on a real
+  // snake, rather than isolated diamonds that read as spots when tiled.
+  const s = w / 18
+  const rowH = s * 0.55
+  let r = 0
+  for (let y = -s; y < h + s; y += rowH, r++) {
+    for (let x = -s; x < w + s; x += s) {
+      const off = (r % 2) * (s / 2)
+      const cx = x + off + s / 2
       g.beginPath()
-      g.moveTo(x + 8, y)
-      g.lineTo(x + 16, y + 8)
-      g.lineTo(x + 8, y + 16)
-      g.lineTo(x, y + 8)
+      g.moveTo(cx - s / 2, y)
+      g.quadraticCurveTo(cx - s / 2, y + s * 0.9, cx, y + s * 0.9)
+      g.quadraticCurveTo(cx + s / 2, y + s * 0.9, cx + s / 2, y)
       g.closePath()
+      g.fillStyle = r % 3 === 0 ? base : belly
       g.fill()
+      g.strokeStyle = 'rgba(0,0,0,0.22)'
+      g.lineWidth = 1.4
+      g.stroke()
     }
   }
-  g.strokeStyle = 'rgba(0,0,0,0.18)'
-  g.lineWidth = 2
-  for (let y = 0; y < 128; y += 16) {
+  // Darker flank shading top and bottom, lighter belly through the middle.
+  const grad = g.createLinearGradient(0, 0, 0, h)
+  grad.addColorStop(0, 'rgba(0,0,0,0.42)')
+  grad.addColorStop(0.5, 'rgba(255,255,255,0.20)')
+  grad.addColorStop(1, 'rgba(0,0,0,0.42)')
+  g.fillStyle = grad
+  g.fillRect(0, 0, w, h)
+}
+
+function snakeSkin(base, belly, rx, ry) {
+  return canvasTex(256, 256, (g, w, h) => scalePattern(g, w, h, base, belly), rx, ry)
+}
+
+function snakeRelief(rx, ry) {
+  return normalFromHeight(
+    256, 256,
+    (g, w, h) => scalePattern(g, w, h, '#6e6e6e', '#d2d2d2'),
+    3.0, rx, ry,
+  )
+}
+
+/** Varnished wood, for the ladder rails and rungs. */
+function woodPattern(g, w, h, light, dark) {
+  g.fillStyle = light
+  g.fillRect(0, 0, w, h)
+  for (let i = 0; i < 90; i++) {
+    const y = Math.random() * h
+    g.strokeStyle = `rgba(0,0,0,${0.05 + Math.random() * 0.16})`
+    g.lineWidth = 0.6 + Math.random() * 2.2
     g.beginPath()
     g.moveTo(0, y)
-    g.lineTo(128, y)
+    for (let x = 0; x <= w; x += 16) {
+      g.lineTo(x, y + Math.sin((x / w) * Math.PI * 4 + i) * 3.2)
+    }
     g.stroke()
   }
-  const t = new THREE.CanvasTexture(c)
-  t.wrapS = t.wrapT = THREE.RepeatWrapping
-  t.colorSpace = THREE.SRGBColorSpace
-  return t
+  const grad = g.createLinearGradient(0, 0, w, 0)
+  grad.addColorStop(0, 'rgba(0,0,0,0.30)')
+  grad.addColorStop(0.45, 'rgba(255,255,255,0.16)')
+  grad.addColorStop(1, 'rgba(0,0,0,0.34)')
+  g.fillStyle = grad
+  g.fillRect(0, 0, w, h)
+  g.fillStyle = dark
+  g.globalAlpha = 0.12
+  g.fillRect(0, 0, w, h)
+  g.globalAlpha = 1
 }
 
 /**
@@ -241,9 +440,23 @@ export function buildSnake(headSq, tailSq, opts = {}) {
   geo.setAttribute('aAlong', new THREE.BufferAttribute(along, 1))
   geo.setAttribute('aBinormal', new THREE.BufferAttribute(binorm, 3))
 
-  const tex = snakeSkin(base, belly)
-  tex.repeat.set(14, 2)
-  const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.45, metalness: 0.12 })
+  // Physical material: scales read as raised relief and pick up a wet sheen
+  // from the environment instead of looking like painted plastic.
+  // Tile density follows the snake's actual length, otherwise a long body
+  // stretches a few scales across the whole board.
+  const rx = Math.max(10, Math.round(curve.getLength() * 3.2))
+  const ry = 4
+  const mat = new THREE.MeshPhysicalMaterial({
+    map: snakeSkin(base, belly, rx, ry),
+    normalMap: snakeRelief(rx, ry),
+    normalScale: new THREE.Vector2(1.1, 1.1),
+    roughness: 0.34,
+    metalness: 0.0,
+    clearcoat: 0.75,
+    clearcoatRoughness: 0.28,
+    sheen: 0.4,
+    sheenColor: new THREE.Color(belly),
+  })
   const uniforms = { uTime: { value: 0 }, uAmp: { value: 0.16 } }
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = uniforms.uTime
@@ -274,7 +487,12 @@ export function buildSnake(headSq, tailSq, opts = {}) {
   group.add(body)
 
   // Head, sitting on its square and facing along the body.
-  const headMat = new THREE.MeshStandardMaterial({ color: base, roughness: 0.4 })
+  const headMat = new THREE.MeshPhysicalMaterial({
+    color: base,
+    roughness: 0.32,
+    clearcoat: 0.8,
+    clearcoatRoughness: 0.25,
+  })
   const head = new THREE.Mesh(new THREE.SphereGeometry(radius * 1.35, 20, 16), headMat)
   head.scale.set(1.15, 0.8, 1.45)
   const p0 = curve.getPoint(0)
@@ -323,9 +541,21 @@ export function buildLadder(fromSq, toSq, opts = {}) {
   const side = new THREE.Vector3(-dir.z, 0, dir.x).normalize().multiplyScalar(0.24)
 
   const group = new THREE.Group()
-  const mat = new THREE.MeshStandardMaterial({ color: wood, roughness: 0.62, metalness: 0.15 })
 
-  const railGeo = new THREE.CylinderGeometry(rail, rail, len, 10)
+  const light = new THREE.Color(wood).lerp(new THREE.Color('#fde68a'), 0.35).getStyle()
+  const mat = new THREE.MeshPhysicalMaterial({
+    map: canvasTex(256, 256, (g, w, h) => woodPattern(g, w, h, light, wood), 1, Math.max(2, len / 2)),
+    normalMap: normalFromHeight(
+      256, 256,
+      (g, w, h) => woodPattern(g, w, h, '#9a9a9a', '#6a6a6a'),
+      1.6, 1, Math.max(2, len / 2),
+    ),
+    roughness: 0.5,
+    clearcoat: 0.45,
+    clearcoatRoughness: 0.4,
+  })
+
+  const railGeo = new THREE.CylinderGeometry(rail, rail, len, 14)
   for (const s of [-1, 1]) {
     const m = new THREE.Mesh(railGeo, mat)
     const mid = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5)
@@ -338,8 +568,12 @@ export function buildLadder(fromSq, toSq, opts = {}) {
   }
 
   const rungs = Math.max(3, Math.round(len / 0.62))
-  const rungGeo = new THREE.CylinderGeometry(rail * 0.8, rail * 0.8, 0.48, 8)
-  const rungMat = new THREE.MeshStandardMaterial({ color: '#facc15', roughness: 0.5, metalness: 0.3 })
+  const rungGeo = new THREE.CylinderGeometry(rail * 0.78, rail * 0.78, 0.48, 12)
+  const rungMat = new THREE.MeshPhysicalMaterial({
+    map: canvasTex(128, 128, (g, w, h) => woodPattern(g, w, h, '#e9c46a', '#b45309'), 1, 2),
+    roughness: 0.44,
+    clearcoat: 0.5,
+  })
   for (let i = 1; i < rungs; i++) {
     const t = i / rungs
     const p = new THREE.Vector3().lerpVectors(start, end, t)
@@ -362,59 +596,85 @@ export function buildLadder(fromSq, toSq, opts = {}) {
  */
 export function buildPawn(color, accent = '#fde68a') {
   const g = new THREE.Group()
-  const skin = new THREE.MeshStandardMaterial({ color: '#c98a5e', roughness: 0.75 })
-  const cloth = new THREE.MeshStandardMaterial({ color, roughness: 0.6 })
-  const trim = new THREE.MeshStandardMaterial({ color: accent, roughness: 0.5, metalness: 0.35 })
 
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.2, 6, 14), cloth)
-  torso.position.y = 0.42
-  torso.castShadow = true
-  g.add(torso)
+  const skin = new THREE.MeshPhysicalMaterial({
+    color: '#b97a51', roughness: 0.62, clearcoat: 0.18, sheen: 0.25,
+  })
+  const cloth = new THREE.MeshPhysicalMaterial({
+    color, roughness: 0.72, sheen: 0.6, sheenColor: new THREE.Color(accent),
+  })
+  const trim = new THREE.MeshStandardMaterial({
+    color: accent, roughness: 0.28, metalness: 0.8,
+  })
+  const hairMat = new THREE.MeshStandardMaterial({ color: '#181210', roughness: 0.72 })
 
-  const sash = new THREE.Mesh(new THREE.TorusGeometry(0.145, 0.028, 8, 20), trim)
-  sash.position.y = 0.34
-  sash.rotation.x = Math.PI / 2
-  g.add(sash)
-
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.115, 20, 16), skin)
-  head.position.y = 0.68
-  head.castShadow = true
-  g.add(head)
-
-  const hair = new THREE.Mesh(
-    new THREE.SphereGeometry(0.12, 20, 16, 0, Math.PI * 2, 0, Math.PI * 0.55),
-    new THREE.MeshStandardMaterial({ color: '#1c1917', roughness: 0.85 }),
-  )
-  hair.position.y = 0.695
-  g.add(hair)
-
-  for (const s of [-1, 1]) {
-    const eye = new THREE.Mesh(
-      new THREE.SphereGeometry(0.019, 8, 8),
-      new THREE.MeshBasicMaterial({ color: '#1c1917' }),
-    )
-    eye.position.set(s * 0.042, 0.7, 0.1)
-    g.add(eye)
+  const add = (mesh, x, y, z) => {
+    mesh.position.set(x, y, z)
+    mesh.castShadow = true
+    g.add(mesh)
+    return mesh
   }
 
-  const limbGeo = new THREE.CapsuleGeometry(0.038, 0.17, 4, 8)
+  // Torso tapering to the waist, plus a wrapped lower garment.
+  add(new THREE.Mesh(new THREE.CylinderGeometry(0.115, 0.135, 0.24, 18), cloth), 0, 0.5, 0)
+  add(new THREE.Mesh(new THREE.SphereGeometry(0.125, 18, 14), cloth), 0, 0.6, 0).scale.set(1, 0.75, 0.8)
+  add(new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.115, 0.26, 18), cloth), 0, 0.26, 0)
+  add(new THREE.Mesh(new THREE.TorusGeometry(0.142, 0.026, 10, 24), trim), 0, 0.38, 0).rotation.x = Math.PI / 2
+
+  // Neck and head.
+  add(new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.05, 0.07, 12), skin), 0, 0.665, 0)
+  const head = add(new THREE.Mesh(new THREE.SphereGeometry(0.105, 24, 20), skin), 0, 0.765, 0)
+  head.scale.set(0.92, 1.06, 0.95)
+
+  const hair = add(
+    new THREE.Mesh(
+      new THREE.SphereGeometry(0.112, 24, 20, 0, Math.PI * 2, 0, Math.PI * 0.62),
+      hairMat,
+    ),
+    0, 0.772, -0.006,
+  )
+  hair.scale.set(0.94, 1.02, 0.98)
+  // Top-knot, the way the figures are drawn on the sheet.
+  add(new THREE.Mesh(new THREE.SphereGeometry(0.042, 14, 12), hairMat), 0, 0.855, -0.03)
+
+  for (const sgn of [-1, 1]) {
+    const eye = add(new THREE.Mesh(new THREE.SphereGeometry(0.017, 10, 10),
+      new THREE.MeshStandardMaterial({ color: '#fdfdfd', roughness: 0.25 })), sgn * 0.037, 0.775, 0.088)
+    eye.scale.set(1, 0.8, 0.55)
+    add(new THREE.Mesh(new THREE.SphereGeometry(0.009, 8, 8),
+      new THREE.MeshBasicMaterial({ color: '#120d0a' })), sgn * 0.037, 0.774, 0.098)
+  }
+  // Forehead mark.
+  add(new THREE.Mesh(new THREE.CircleGeometry(0.012, 12),
+    new THREE.MeshBasicMaterial({ color: '#b91c1c' })), 0, 0.805, 0.098)
+
+  const nose = add(new THREE.Mesh(new THREE.ConeGeometry(0.016, 0.04, 8), skin), 0, 0.757, 0.098)
+  nose.rotation.x = Math.PI / 2
+
+  // Limbs hang from pivots so a rotation swings the whole limb.
   const joints = {}
-  for (const [name, x, y] of [
-    ['armL', -0.16, 0.52],
-    ['armR', 0.16, 0.52],
-    ['legL', -0.07, 0.22],
-    ['legR', 0.07, 0.22],
-  ]) {
-    // Pivot at the shoulder or hip so a rotation swings the limb properly.
+  const limb = (name, x, y, upper, lower, mat, endMat, endR) => {
     const pivot = new THREE.Group()
     pivot.position.set(x, y, 0)
-    const limb = new THREE.Mesh(limbGeo, name.startsWith('arm') ? skin : cloth)
-    limb.position.y = -0.11
-    limb.castShadow = true
-    pivot.add(limb)
+    const a = new THREE.Mesh(new THREE.CapsuleGeometry(0.036, upper, 6, 12), mat)
+    a.position.y = -upper / 2 - 0.03
+    a.castShadow = true
+    pivot.add(a)
+    const b = new THREE.Mesh(new THREE.CapsuleGeometry(0.031, lower, 6, 12), mat)
+    b.position.y = -upper - lower / 2 - 0.07
+    b.castShadow = true
+    pivot.add(b)
+    const end = new THREE.Mesh(new THREE.SphereGeometry(endR, 12, 10), endMat)
+    end.position.y = -upper - lower - 0.11
+    end.castShadow = true
+    pivot.add(end)
     g.add(pivot)
     joints[name] = pivot
   }
+  limb('armL', -0.145, 0.585, 0.11, 0.10, skin, skin, 0.035)
+  limb('armR', 0.145, 0.585, 0.11, 0.10, skin, skin, 0.035)
+  limb('legL', -0.062, 0.235, 0.11, 0.11, cloth, skin, 0.04)
+  limb('legR', 0.062, 0.235, 0.11, 0.11, cloth, skin, 0.04)
 
   g.userData = { joints, color }
   return g
