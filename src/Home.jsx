@@ -3,13 +3,6 @@ import './home.css'
 
 const APPS = [
   {
-    href: '#/journal',
-    icon: '📈',
-    title: 'Trading Journal',
-    desc: 'Log trades, track P&L, and analyze your performance.',
-    accent: 'green',
-  },
-  {
     href: '#/sudoku',
     icon: '🔢',
     title: 'Sudoku',
@@ -17,25 +10,11 @@ const APPS = [
     accent: 'blue',
   },
   {
-    href: '#/exam',
-    icon: '🎓',
-    title: 'Exam Prep',
-    desc: 'AP Vidyut AEE — practice MCQs, timed mock tests, and track progress.',
-    accent: 'green',
-  },
-  {
     href: '#/chart',
     icon: '📊',
     title: 'NIFTY Chart',
     desc: '10 years of NIFTY 50 candles — zoom, pan, and switch timeframes.',
     accent: 'blue',
-  },
-  {
-    href: '#/orb',
-    icon: '🎯',
-    title: '5-Min ORB Practice',
-    desc: 'Practise the opening-range breakout: take trades on replay and score them.',
-    accent: 'green',
   },
   {
     href: '#/snake',
