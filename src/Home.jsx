@@ -44,6 +44,13 @@ const APPS = [
     desc: 'Neon arcade Snake — swipe to steer, combos, power-ups and a retro skin.',
     accent: 'blue',
   },
+  {
+    href: '#/vaikuntapali',
+    icon: '🎲',
+    title: 'Vaikuntapali 3D',
+    desc: 'వైకుంఠపాళి in 3D — 132 squares, slithering serpents and climbable ladders.',
+    accent: 'green',
+  },
 ]
 
 export default function Home() {
