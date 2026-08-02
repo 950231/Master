@@ -10,6 +10,7 @@ import {
   pelletScore,
   POWERS,
 } from './snake.js'
+import { buildSpine, stepBoluses, drawCobra, COBRA_SKINS } from './cobra.js'
 import './snake.css'
 
 const COLS = 22
@@ -113,6 +114,7 @@ export default function SnakeGame() {
     power: null, // {x,y,kind} on the board
     active: {}, // kind -> expiry timestamp
     pelletsSincePower: 0,
+    boluses: [], // meals still travelling down the body
     phase: 'menu',
     mode: 'classic',
   })
@@ -149,6 +151,7 @@ export default function SnakeGame() {
     g.power = null
     g.active = {}
     g.pelletsSincePower = 0
+    g.boluses = []
     g.shake = 0
     g.dur = tickMs(0)
     g.anim = 0
@@ -247,6 +250,9 @@ export default function SnakeGame() {
               const m = g.mode
               setHigh((h) => (g.score > h[m] ? { ...h, [m]: g.score } : h))
               g.pelletsSincePower++
+              // The pellet is swallowed: it becomes a lump that travels
+              // from the mouth all the way down to the tail.
+              g.boluses.push({ d: 0, size: 1 })
               burst(g, head.x, head.y, skin.food, 16)
               g.pops.push({ x: head.x, y: head.y, text: `+${gained}`, life: 1 })
               if (prefs.haptics) buzz(g.combo > 1 ? 18 : 10)
@@ -370,21 +376,28 @@ export default function SnakeGame() {
       }
 
       if (gm) {
-        // food — pulsing orb
+        // food — an egg, so what gets swallowed reads as prey rather than
+        // an abstract dot
         if (gm.food) {
           const pulse = 0.5 + 0.5 * Math.sin(anim / 180)
           const cx = gm.food.x * cell + cell / 2
           const cy = gm.food.y * cell + cell / 2
-          const r = cell * (0.26 + pulse * 0.07)
+          const r = cell * (0.24 + pulse * 0.04)
           if (skin.glow) {
-            ctx.shadowBlur = 22
+            ctx.shadowBlur = 20
             ctx.shadowColor = skin.food
           }
-          ctx.fillStyle = skin.food
           ctx.beginPath()
-          ctx.arc(cx, cy, r, 0, Math.PI * 2)
+          ctx.ellipse(cx, cy, r * 0.82, r * 1.06, 0, 0, Math.PI * 2)
+          ctx.fillStyle = skin.food
           ctx.fill()
           ctx.shadowBlur = 0
+          if (skin.glow) {
+            ctx.beginPath()
+            ctx.ellipse(cx - r * 0.26, cy - r * 0.36, r * 0.24, r * 0.16, -0.5, 0, Math.PI * 2)
+            ctx.fillStyle = 'rgba(255,255,255,0.75)'
+            ctx.fill()
+          }
         }
 
         // power-up
@@ -418,8 +431,6 @@ export default function SnakeGame() {
         const cur = gm.snake
         const prev = g.prev || cur
         const ghosting = !!g.active.ghost
-        ctx.lineCap = 'round'
-        ctx.lineJoin = 'round'
 
         const pts = cur.map((c, i) => {
           const p = prev[Math.min(i, prev.length - 1)] || c
@@ -430,47 +441,21 @@ export default function SnakeGame() {
           return { x: px * cell + cell / 2, y: py * cell + cell / 2 }
         })
 
-        const grad = ctx.createLinearGradient(pts[0].x, pts[0].y, pts.at(-1).x, pts.at(-1).y)
-        grad.addColorStop(0, skin.body[0])
-        grad.addColorStop(0.5, skin.body[1])
-        grad.addColorStop(1, skin.body[2])
-
-        ctx.globalAlpha = ghosting ? 0.55 : 1
-        if (skin.glow) {
-          ctx.shadowBlur = 18
-          ctx.shadowColor = skin.body[1]
+        const spine = buildSpine(pts, cell)
+        // Lumps only travel while play is running, so a pause holds them.
+        if (g.phase === 'playing') {
+          g.boluses = stepBoluses(g.boluses, frameDt / 1000, spine.total, 1.5)
         }
-        ctx.strokeStyle = grad
-        ctx.lineWidth = cell * 0.72
-        ctx.beginPath()
-        pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)))
-        if (pts.length === 1) ctx.lineTo(pts[0].x + 0.1, pts[0].y)
-        ctx.stroke()
-        ctx.shadowBlur = 0
-
-        // head + eyes
-        const head = pts[0]
-        ctx.fillStyle = skin.head
-        ctx.beginPath()
-        ctx.arc(head.x, head.y, cell * 0.38, 0, Math.PI * 2)
-        ctx.fill()
-        if (skin.glow) {
-          const d = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }[gm.dir] || [1, 0]
-          const ex = d[1] !== 0 ? 0.16 : 0.1
-          const ey = d[0] !== 0 ? 0.16 : 0.1
-          ctx.fillStyle = '#06121a'
-          for (const s of [-1, 1]) {
-            ctx.beginPath()
-            ctx.arc(
-              head.x + d[0] * cell * 0.13 + s * ey * cell,
-              head.y + d[1] * cell * 0.13 + s * ex * cell,
-              cell * 0.07,
-              0,
-              Math.PI * 2,
-            )
-            ctx.fill()
-          }
-        }
+        const hd = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }[gm.dir] || [1, 0]
+        drawCobra(ctx, spine, {
+          cell,
+          base: cell * 0.34,
+          boluses: g.boluses,
+          skin: COBRA_SKINS[prefs.skin] || COBRA_SKINS.neon,
+          dir: { x: hd[0], y: hd[1] },
+          anim,
+          ghost: ghosting,
+        })
         ctx.globalAlpha = 1
       }
 
