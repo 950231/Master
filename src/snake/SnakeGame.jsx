@@ -11,7 +11,7 @@ import {
   POWERS,
 } from './snake.js'
 import { buildSpine, stepBoluses, drawCobra, COBRA_SKINS } from './cobra.js'
-import { unlock, isMuted, toggleMuted, play } from '../audio.js'
+import { unlock, cycleSound, soundLabel, play } from '../audio.js'
 import './snake.css'
 
 const COLS = 22
@@ -93,7 +93,7 @@ export default function SnakeGame() {
   )
   // Mirrored into React state only for the HUD; the loop reads the refs.
   const [hud, setHud] = useState({ score: 0, combo: 0, powers: {}, len: 3 })
-  const [sound, setSound] = useState(() => !isMuted())
+  const [sound, setSound] = useState(soundLabel)
 
   const canvasRef = useRef(null)
   const stageRef = useRef(null)
@@ -668,14 +668,16 @@ export default function SnakeGame() {
           {phase === 'playing' ? '❚❚ PAUSE' : '▶ RESUME'}
         </button>
         <button
-          className={`sn2-haptic ${sound ? 'on' : ''}`}
+          className={`sn2-haptic ${sound.on ? 'on' : ''}`}
           onClick={() => {
             unlock()
-            setSound(!toggleMuted())
+            cycleSound()
+            setSound(soundLabel())
             play('tap')
           }}
+          title="Arcade, Nokia or muted"
         >
-          {sound ? '🔊 SOUND' : '🔇 MUTED'}
+          {sound.icon} {sound.text}
         </button>
         <button
           className={`sn2-haptic ${prefs.haptics ? 'on' : ''}`}

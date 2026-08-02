@@ -7,7 +7,7 @@ import {
   UNIT_CELLS,
 } from './sudoku.js'
 import ThemePicker from '../ThemePicker.jsx'
-import { unlock, isMuted, toggleMuted, play } from '../audio.js'
+import { unlock, cycleSound, soundLabel, play } from '../audio.js'
 import './sudoku.css'
 
 const GAME_KEY = 'sudoku.game.v1'
@@ -135,7 +135,7 @@ export default function SudokuApp() {
   }, [finished])
 
   const conflicts = useMemo(() => findConflicts(board), [board])
-  const [sound, setSound] = useState(() => !isMuted())
+  const [sound, setSound] = useState(soundLabel)
   const level = levelInfo(profile.xp)
 
   const pushPopup = useCallback((text, kind = 'score') => {
@@ -463,15 +463,16 @@ export default function SudokuApp() {
           💡 Hint
         </button>
         <button
-          className={`sk-tool ${sound ? 'active' : ''}`}
+          className={`sk-tool ${sound.on ? 'active' : ''}`}
           onClick={() => {
             unlock()
-            setSound(!toggleMuted())
+            cycleSound()
+            setSound(soundLabel())
             play('tap')
           }}
-          title={sound ? 'Sound on' : 'Sound off'}
+          title="Arcade, Nokia or muted"
         >
-          {sound ? '🔊' : '🔇'}
+          {sound.icon}
         </button>
       </div>
 
