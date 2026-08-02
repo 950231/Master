@@ -17,6 +17,13 @@ const APPS = [
     accent: 'blue',
   },
   {
+    href: '#/vp',
+    icon: '🎲',
+    title: 'Vaikuntapali',
+    desc: 'Play on a photo of your own board, with your own faces as the pieces.',
+    accent: 'green',
+  },
+  {
     href: '#/snake',
     icon: '🐍',
     title: 'Snake',
