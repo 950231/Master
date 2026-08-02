@@ -1,8 +1,15 @@
+/* The page is a full-height column: the header, HUD and controls take the
+   height they need and the stage soaks up everything that is left, so the
+   arena grows to fit the screen instead of a fixed phone-width column. */
 .sn2 {
-  max-width: 520px;
+  max-width: 1100px;
   margin: 0 auto;
-  padding: 16px 14px 34px;
-  min-height: 100vh;
+  padding: 12px 10px 14px;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
   --neon: #a855f7;
   --neon2: #22d3ee;
 }
@@ -10,9 +17,15 @@
 /* ---------- top bar ---------- */
 .sn2-top {
   display: grid;
-  grid-template-columns: 44px 1fr 44px;
+  grid-template-columns: 44px 1fr 92px;
   align-items: center;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
+  flex: none;
+}
+.sn2-tools {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 .sn2-back,
 .sn2-icon {
@@ -51,6 +64,7 @@
   align-items: center;
   gap: 10px;
   margin-bottom: 10px;
+  flex: none;
 }
 .sn2-stat {
   display: flex;
@@ -91,8 +105,19 @@
 }
 
 /* ---------- board ---------- */
+/* The stage claims the leftover height and centres a letterboxed arena; the
+   swipe handler lives here so the margins around the board still steer. */
+.sn2-stage {
+  flex: 1 1 auto;
+  min-height: 200px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  touch-action: none;
+}
 .sn2-board {
   position: relative;
+  width: fit-content;
   border-radius: 22px;
   overflow: hidden;
   border: 1px solid rgba(168, 120, 255, 0.35);
@@ -108,9 +133,10 @@
   background: #a9b665;
   box-shadow: inset 0 0 30px rgba(70, 88, 30, 0.5);
 }
+/* Width and height are set in px by the render loop, which measures the
+   stage — CSS must not stretch the canvas or the grid would skew. */
 .sn2-board canvas {
   display: block;
-  width: 100%;
 }
 
 /* active power chips */
@@ -216,6 +242,7 @@
   display: flex;
   gap: 8px;
   margin-top: 12px;
+  flex: none;
 }
 .sn2-actions button {
   flex: 1;
@@ -243,6 +270,7 @@
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   margin-top: 10px;
+  flex: none;
 }
 .sn2-mode {
   background: var(--panel);
@@ -279,7 +307,8 @@
   flex-wrap: wrap;
   gap: 6px;
   justify-content: center;
-  margin-top: 14px;
+  margin-top: 12px;
+  flex: none;
 }
 .sn2-legend span {
   font-size: 10px;
@@ -289,6 +318,46 @@
   border: 1px solid color-mix(in srgb, var(--pc) 45%, transparent);
   border-radius: 999px;
   padding: 4px 10px;
+}
+
+/* ---------- wide + short (tablet held landscape) ----------
+   Stacked controls would leave the arena only a sliver of height, so the HUD
+   and controls move into a side rail and the stage takes the full height. */
+@media (min-width: 700px) and (orientation: landscape) {
+  .sn2 {
+    max-width: none;
+    display: grid;
+    grid-template-columns: 1fr clamp(190px, 24%, 270px);
+    grid-template-rows: auto auto auto auto 1fr;
+    column-gap: 18px;
+  }
+  .sn2-top { grid-area: 1 / 1 / 2 / 3; }
+  .sn2-stage { grid-area: 2 / 1 / 6 / 2; }
+  .sn2-hud { grid-area: 2 / 2 / 3 / 3; margin-bottom: 0; }
+  .sn2-actions { grid-area: 3 / 2 / 4 / 3; }
+  .sn2-modes { grid-area: 4 / 2 / 5 / 3; }
+  .sn2-legend { grid-area: 5 / 2 / 6 / 3; align-self: start; }
+}
+
+/* ---------- zen: hand the chrome's space back to the arena ---------- */
+/* Deliberately no display override — the landscape rail above already gives
+   the stage the full height, and forcing the column layout back would make
+   the board smaller, which is the opposite of what this button promises. */
+.sn2.zen {
+  max-width: none;
+  padding: 8px 10px 10px;
+}
+.sn2.zen .sn2-title,
+.sn2.zen .sn2-modes,
+.sn2.zen .sn2-legend {
+  display: none;
+}
+.sn2.zen .sn2-top {
+  margin-bottom: 8px;
+}
+.sn2-zen.on {
+  border-color: var(--neon);
+  color: var(--neon);
 }
 
 @media (max-width: 420px) {

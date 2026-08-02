@@ -64,16 +64,36 @@ const buzz = (ms) => {
 
 const lerp = (a, b, t) => a + (b - a) * t
 
+const isFullscreen = () => !!(document.fullscreenElement || document.webkitFullscreenElement)
+
+/**
+ * Ask for real fullscreen so the browser chrome stops eating the arena.
+ * Silently ignored where it is unsupported or blocked — hiding the in-page
+ * controls already gains some room on its own, so the toggle still does
+ * something either way.
+ */
+function setFullscreen(on) {
+  const el = document.documentElement
+  try {
+    if (on) (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el)
+    else if (isFullscreen()) (document.exitFullscreen || document.webkitExitFullscreen)?.call(document)
+  } catch {
+    /* not available */
+  }
+}
+
 export default function SnakeGame() {
   const [mode, setMode] = useState('classic')
   const [phase, setPhase] = useState('menu') // menu | playing | paused | over
   const [high, setHigh] = useState(() => loadJSON(HS_KEY, { classic: 0, wrap: 0, maze: 0 }))
-  const [prefs, setPrefs] = useState(() => loadJSON(PREF_KEY, { skin: 'neon', haptics: true }))
+  const [prefs, setPrefs] = useState(() =>
+    loadJSON(PREF_KEY, { skin: 'neon', haptics: true, zen: false }),
+  )
   // Mirrored into React state only for the HUD; the loop reads the refs.
   const [hud, setHud] = useState({ score: 0, combo: 0, powers: {}, len: 3 })
 
   const canvasRef = useRef(null)
-  const wrapRef = useRef(null)
+  const stageRef = useRef(null)
 
   // ---- mutable game state, driven by the loop ----
   const G = useRef({
@@ -282,15 +302,23 @@ export default function SnakeGame() {
       if (dt) g.shake *= 0.88
 
       // ---- render ----
-      const wrapEl = wrapRef.current
-      if (!wrapEl) return
+      // Size the arena from the space free in *both* axes rather than width
+      // alone, so it fills a tablet screen instead of staying phone-sized.
+      // The grid itself is always 22x16, so a record set on one device means
+      // the same thing on another — only the cells get bigger.
+      const stageEl = stageRef.current
+      if (!stageEl) return
       const dpr = window.devicePixelRatio || 1
-      const w = wrapEl.clientWidth
-      const cell = w / COLS
+      const cell = Math.max(
+        8,
+        Math.floor(Math.min((stageEl.clientWidth - 4) / COLS, (stageEl.clientHeight - 4) / ROWS)),
+      )
+      const w = cell * COLS
       const h = cell * ROWS
       if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
         canvas.width = Math.round(w * dpr)
         canvas.height = Math.round(h * dpr)
+        canvas.style.width = w + 'px'
         canvas.style.height = h + 'px'
       }
       const ctx = canvas.getContext('2d')
@@ -495,9 +523,11 @@ export default function SnakeGame() {
     return () => window.removeEventListener('keydown', onKey)
   }, [turn, start])
 
-  // Swipe anywhere on the board — the primary control on touch.
+  // Swipe anywhere in the play area — the primary control on touch. Bound to
+  // the stage rather than the board so the margins around a letterboxed arena
+  // still steer.
   useEffect(() => {
-    const el = wrapRef.current
+    const el = stageRef.current
     if (!el) return
     let s = null
     const down = (e) => (s = { x: e.clientX, y: e.clientY, t: performance.now() })
@@ -528,20 +558,47 @@ export default function SnakeGame() {
     if (phase === 'playing') G.current.lastTick = performance.now()
   }, [phase])
 
+  // Leaving fullscreen by Esc or a system gesture must bring the controls
+  // back, otherwise the button is left lying about the current state.
+  useEffect(() => {
+    const sync = () => {
+      if (!isFullscreen()) setPrefs((p) => (p.zen ? { ...p, zen: false } : p))
+    }
+    document.addEventListener('fullscreenchange', sync)
+    document.addEventListener('webkitfullscreenchange', sync)
+    return () => {
+      document.removeEventListener('fullscreenchange', sync)
+      document.removeEventListener('webkitfullscreenchange', sync)
+    }
+  }, [])
+
   const activePowers = Object.keys(hud.powers || {})
 
   return (
-    <div className={`sn2 skin-${prefs.skin}`}>
+    <div className={`sn2 skin-${prefs.skin} ${prefs.zen ? 'zen' : ''}`}>
       <header className="sn2-top">
         <a href="#/" className="sn2-back">←</a>
         <div className="sn2-title">SNAKE<span>·XR</span></div>
-        <button
-          className="sn2-icon"
-          onClick={() => setPrefs((p) => ({ ...p, skin: p.skin === 'neon' ? 'retro' : 'neon' }))}
-          title="Toggle skin"
-        >
-          {prefs.skin === 'neon' ? '◐' : '◑'}
-        </button>
+        <div className="sn2-tools">
+          <button
+            className="sn2-icon"
+            onClick={() => setPrefs((p) => ({ ...p, skin: p.skin === 'neon' ? 'retro' : 'neon' }))}
+            title="Toggle skin"
+          >
+            {prefs.skin === 'neon' ? '◐' : '◑'}
+          </button>
+          <button
+            className={`sn2-icon sn2-zen ${prefs.zen ? 'on' : ''}`}
+            onClick={() => {
+              const next = !prefs.zen
+              setFullscreen(next)
+              setPrefs((p) => ({ ...p, zen: next }))
+            }}
+            title={prefs.zen ? 'Show controls' : 'Expand arena'}
+          >
+            {prefs.zen ? '⤡' : '⤢'}
+          </button>
+        </div>
       </header>
 
       <div className="sn2-hud">
@@ -558,49 +615,51 @@ export default function SnakeGame() {
         </div>
       </div>
 
-      <div className="sn2-board" ref={wrapRef}>
-        <canvas ref={canvasRef} />
+      <div className="sn2-stage" ref={stageRef}>
+        <div className="sn2-board">
+          <canvas ref={canvasRef} />
 
-        {activePowers.length > 0 && phase === 'playing' && (
-          <div className="sn2-powers">
-            {activePowers.map((k) => (
-              <span key={k} style={{ '--pc': POWERS[k].color }}>
-                {POWERS[k].icon} {POWERS[k].label}
-              </span>
-            ))}
-          </div>
-        )}
+          {activePowers.length > 0 && phase === 'playing' && (
+            <div className="sn2-powers">
+              {activePowers.map((k) => (
+                <span key={k} style={{ '--pc': POWERS[k].color }}>
+                  {POWERS[k].icon} {POWERS[k].label}
+                </span>
+              ))}
+            </div>
+          )}
 
-        {phase !== 'playing' && (
-          <div className="sn2-overlay">
-            {phase === 'menu' && (
-              <>
-                <div className="sn2-big">SNAKE</div>
-                <p className="sn2-hint-l">{MODES.find((m) => m.id === mode).hint}</p>
-                <button className="sn2-cta" onClick={start}>TAP TO PLAY</button>
-                <p className="sn2-tip">swipe anywhere to steer</p>
-              </>
-            )}
-            {phase === 'paused' && (
-              <>
-                <div className="sn2-big">PAUSED</div>
-                <button className="sn2-cta" onClick={() => setPhase('playing')}>RESUME</button>
-              </>
-            )}
-            {phase === 'over' && (
-              <>
-                <div className="sn2-big red">GAME OVER</div>
-                <div className="sn2-final">{hud.score}</div>
-                <p className="sn2-hint-l">
-                  {hud.score >= high[mode] && hud.score > 0
-                    ? '🏆 NEW RECORD'
-                    : `best ${high[mode]} · length ${hud.len}`}
-                </p>
-                <button className="sn2-cta" onClick={start}>PLAY AGAIN</button>
-              </>
-            )}
-          </div>
-        )}
+          {phase !== 'playing' && (
+            <div className="sn2-overlay">
+              {phase === 'menu' && (
+                <>
+                  <div className="sn2-big">SNAKE</div>
+                  <p className="sn2-hint-l">{MODES.find((m) => m.id === mode).hint}</p>
+                  <button className="sn2-cta" onClick={start}>TAP TO PLAY</button>
+                  <p className="sn2-tip">swipe anywhere to steer</p>
+                </>
+              )}
+              {phase === 'paused' && (
+                <>
+                  <div className="sn2-big">PAUSED</div>
+                  <button className="sn2-cta" onClick={() => setPhase('playing')}>RESUME</button>
+                </>
+              )}
+              {phase === 'over' && (
+                <>
+                  <div className="sn2-big red">GAME OVER</div>
+                  <div className="sn2-final">{hud.score}</div>
+                  <p className="sn2-hint-l">
+                    {hud.score >= high[mode] && hud.score > 0
+                      ? '🏆 NEW RECORD'
+                      : `best ${high[mode]} · length ${hud.len}`}
+                  </p>
+                  <button className="sn2-cta" onClick={start}>PLAY AGAIN</button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="sn2-actions">
