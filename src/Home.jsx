@@ -37,6 +37,13 @@ const APPS = [
     desc: 'Practise the opening-range breakout: take trades on replay and score them.',
     accent: 'green',
   },
+  {
+    href: '#/snake',
+    icon: '🐍',
+    title: 'Snake',
+    desc: 'The old Nokia classic — monochrome LCD, three modes, high scores.',
+    accent: 'blue',
+  },
 ]
 
 export default function Home() {
