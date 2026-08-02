@@ -609,13 +609,3 @@ textarea {
     font-size: 19px;
   }
 }
-
-/* Shown while a lazily-loaded route fetches its chunk. */
-.route-loading {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  color: var(--text-dim);
-  font-size: 14px;
-  letter-spacing: 2px;
-}
