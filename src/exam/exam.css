@@ -444,3 +444,20 @@
     grid-template-columns: repeat(8, 1fr);
   }
 }
+
+/* ---------- tablet ----------
+   The menu, stats and subject list have room to spread out on a larger
+   screen. Question and option text stays narrower on purpose — a line of
+   prose running the full width of a tablet is hard to read. */
+@media (min-width: 820px) {
+  .exam-app {
+    max-width: 940px;
+    padding: 24px 24px 48px;
+  }
+  .ex-question,
+  .ex-options {
+    max-width: 760px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+}

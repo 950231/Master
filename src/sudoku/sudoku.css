@@ -493,3 +493,65 @@
     gap: 4px;
   }
 }
+
+/* ---------- tablet held landscape ----------
+   Stacked vertically the board plus the keypad are taller than a short,
+   wide screen, so the puzzle scrolls while half the width sits empty.
+   Here the board takes the full height on the left and everything else
+   moves into a side column. */
+@media (min-width: 900px) and (orientation: landscape) {
+  .sudoku-app {
+    max-width: none;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 1fr minmax(280px, 330px);
+    grid-template-rows: auto auto auto auto auto 1fr;
+    column-gap: 26px;
+    row-gap: 12px;
+    padding: 16px 22px;
+    overflow: hidden;
+  }
+  .sk-header { grid-area: 1 / 1 / 2 / 3; }
+
+  /* The board is square, so with the height fixed it sets its own width. */
+  .sk-board-wrap {
+    grid-area: 2 / 1 / 7 / 2;
+    display: grid;
+    place-items: center;
+    min-height: 0;
+  }
+  .sk-board {
+    height: 100%;
+    width: auto;
+    max-width: 100%;
+  }
+
+  .sk-level { grid-area: 2 / 2 / 3 / 3; }
+  .sk-status { grid-area: 3 / 2 / 4 / 3; }
+  .sk-tools { grid-area: 4 / 2 / 5 / 3; }
+
+  /* Nine keys across a narrow rail would be thumb-sized slivers, so the pad
+     becomes a 3x3 block with keys big enough to hit. */
+  .sk-keypad {
+    grid-area: 5 / 2 / 6 / 3;
+    align-self: start;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+  .sk-key {
+    aspect-ratio: 4 / 3;
+  }
+  .sk-key-num {
+    font-size: 30px;
+  }
+}
+
+/* Tablet held upright: there is spare width and height, so give the board
+   more of it rather than leaving a phone-sized column in the middle. */
+@media (min-width: 700px) and (orientation: portrait) {
+  .sudoku-app {
+    max-width: 680px;
+  }
+}
