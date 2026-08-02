@@ -11,6 +11,7 @@ import {
   POWERS,
 } from './snake.js'
 import { buildSpine, stepBoluses, drawCobra, COBRA_SKINS } from './cobra.js'
+import { unlock, isMuted, toggleMuted, play } from '../audio.js'
 import './snake.css'
 
 const COLS = 22
@@ -92,6 +93,7 @@ export default function SnakeGame() {
   )
   // Mirrored into React state only for the HUD; the loop reads the refs.
   const [hud, setHud] = useState({ score: 0, combo: 0, powers: {}, len: 3 })
+  const [sound, setSound] = useState(() => !isMuted())
 
   const canvasRef = useRef(null)
   const stageRef = useRef(null)
@@ -139,6 +141,9 @@ export default function SnakeGame() {
   const wallsFor = useCallback((m) => (m === 'maze' ? mazeWalls('box', COLS, ROWS) : []), [])
 
   const start = useCallback(() => {
+    // Browsers only allow audio to begin inside a user gesture; starting a
+    // run always is one.
+    unlock()
     const g = G.current
     g.game = createGame(COLS, ROWS, { walls: wallsFor(g.mode) })
     g.prev = g.game.snake
@@ -170,6 +175,7 @@ export default function SnakeGame() {
       if (g.queue.length < 2) {
         g.queue.push(dir)
         if (prefs.haptics) buzz(8)
+        play('turn')
       }
     },
     [prefs.haptics],
@@ -235,6 +241,7 @@ export default function SnakeGame() {
             g.shake = 1
             burst(g, before[0].x, before[0].y, '#ef4444', 26)
             if (prefs.haptics) buzz([30, 40, 60])
+            play('die')
             setPhase('over')
             setHigh((h) => (g.score > h[g.mode] ? { ...h, [g.mode]: g.score } : h))
           } else {
@@ -256,6 +263,8 @@ export default function SnakeGame() {
               burst(g, head.x, head.y, skin.food, 16)
               g.pops.push({ x: head.x, y: head.y, text: `+${gained}`, life: 1 })
               if (prefs.haptics) buzz(g.combo > 1 ? 18 : 10)
+              play('eat', g.combo)
+              play('swallow')
 
               if (!g.power && g.pelletsSincePower >= POWER_EVERY) {
                 g.pelletsSincePower = 0
@@ -270,6 +279,7 @@ export default function SnakeGame() {
               burst(g, head.x, head.y, spec.color, 20)
               g.pops.push({ x: head.x, y: head.y, text: spec.label, life: 1.4 })
               if (prefs.haptics) buzz([12, 30, 12])
+              play('power')
               if (kind === 'shrink') {
                 const keep = Math.max(3, Math.ceil(next.snake.length / 2))
                 next.snake = next.snake.slice(0, keep)
@@ -658,10 +668,20 @@ export default function SnakeGame() {
           {phase === 'playing' ? '❚❚ PAUSE' : '▶ RESUME'}
         </button>
         <button
+          className={`sn2-haptic ${sound ? 'on' : ''}`}
+          onClick={() => {
+            unlock()
+            setSound(!toggleMuted())
+            play('tap')
+          }}
+        >
+          {sound ? '🔊 SOUND' : '🔇 MUTED'}
+        </button>
+        <button
           className={`sn2-haptic ${prefs.haptics ? 'on' : ''}`}
           onClick={() => setPrefs((p) => ({ ...p, haptics: !p.haptics }))}
         >
-          {prefs.haptics ? '📳 ON' : '📴 OFF'}
+          {prefs.haptics ? '📳' : '📴'}
         </button>
       </div>
 

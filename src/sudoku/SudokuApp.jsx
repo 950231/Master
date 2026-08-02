@@ -7,6 +7,7 @@ import {
   UNIT_CELLS,
 } from './sudoku.js'
 import ThemePicker from '../ThemePicker.jsx'
+import { unlock, isMuted, toggleMuted, play } from '../audio.js'
 import './sudoku.css'
 
 const GAME_KEY = 'sudoku.game.v1'
@@ -134,6 +135,7 @@ export default function SudokuApp() {
   }, [finished])
 
   const conflicts = useMemo(() => findConflicts(board), [board])
+  const [sound, setSound] = useState(() => !isMuted())
   const level = levelInfo(profile.xp)
 
   const pushPopup = useCallback((text, kind = 'score') => {
@@ -191,9 +193,11 @@ export default function SudokuApp() {
         nextLives -= 1
         nextMistakes += 1
         pushPopup('−1 ♥', 'life')
+        play('wrong')
       } else if (value !== 0 && !wrong) {
         // Correct placement — award points and detect completed units.
         earned += 5
+        play('place')
         const before = completedUnitKeys(board)
         const after = completedUnitKeys(nextBoard)
         const newKeys = [...after].filter((k) => !before.has(k))
@@ -208,6 +212,7 @@ export default function SudokuApp() {
           const unitPts = Math.round((base + comboBonus) * mult)
           earned += unitPts
 
+          play('unit')
           if (newKeys.length > 1) {
             pushPopup(`Combo ×${newKeys.length}! +${unitPts}`, 'combo')
           } else {
@@ -251,7 +256,10 @@ export default function SudokuApp() {
         })
       }
 
-      if (solved) pushPopup(`Solved! +${winBonus}`, 'win')
+      if (solved) {
+        pushPopup(`Solved! +${winBonus}`, 'win')
+        play('win')
+      }
     },
     [
       selected,
@@ -290,6 +298,9 @@ export default function SudokuApp() {
       nextBoard[selected] = g.solution[selected]
       nextNotes[selected] = []
       const solved = isSolved(nextBoard)
+      // A hint writes the digit directly rather than going through
+      // placeValue, so it has to announce itself here.
+      play(solved ? 'win' : 'place')
       return { ...g, board: nextBoard, notes: nextNotes, won: solved }
     })
   }, [selected, finished, puzzle, board, solution])
@@ -404,7 +415,14 @@ export default function SudokuApp() {
               .join(' ')
 
             return (
-              <button key={i} className={cls} onClick={() => setSelected(i)}>
+              <button
+                key={i}
+                className={cls}
+                onClick={() => {
+                  unlock()
+                  setSelected(i)
+                }}
+              >
                 {value !== 0 ? (
                   <span className="sk-val">{value}</span>
                 ) : notes[i].length ? (
@@ -443,6 +461,17 @@ export default function SudokuApp() {
         </button>
         <button className="sk-tool" onClick={useHint}>
           💡 Hint
+        </button>
+        <button
+          className={`sk-tool ${sound ? 'active' : ''}`}
+          onClick={() => {
+            unlock()
+            setSound(!toggleMuted())
+            play('tap')
+          }}
+          title={sound ? 'Sound on' : 'Sound off'}
+        >
+          {sound ? '🔊' : '🔇'}
         </button>
       </div>
 
