@@ -57,7 +57,7 @@ export function createGame(cols, rows, opts = {}) {
  * Nokia rule is walls kill, which is the default.
  */
 export function step(state, cols, rows, opts = {}) {
-  const { wrap = false, walls = [], rand = Math.random } = opts
+  const { wrap = false, walls = [], rand = Math.random, ghost = false } = opts
   if (!state.alive) return state
 
   const d = DIRS[state.dir]
@@ -78,7 +78,7 @@ export function step(state, cols, rows, opts = {}) {
   // The tail cell is vacated this tick, so moving into it is legal unless the
   // snake is growing.
   const body = ate ? state.snake : state.snake.slice(0, -1)
-  if (body.some((s) => s.x === head.x && s.y === head.y)) {
+  if (!ghost && body.some((s) => s.x === head.x && s.y === head.y)) {
     return { ...state, alive: false, ate: false }
   }
 
@@ -123,4 +123,30 @@ export function mazeWalls(id, cols, rows) {
     }
   }
   return w
+}
+
+/** Power-ups that can appear alongside food. */
+export const POWERS = {
+  ghost: { icon: '👻', label: 'GHOST', ms: 6000, color: '#a855f7' },
+  slow: { icon: '🐌', label: 'SLOW-MO', ms: 6000, color: '#38bdf8' },
+  double: { icon: '✦', label: 'x2 SCORE', ms: 8000, color: '#fbbf24' },
+  shrink: { icon: '✂', label: 'SHRINK', ms: 0, color: '#34d399' },
+}
+export const POWER_IDS = Object.keys(POWERS)
+
+/** Pick a free cell for a power-up, avoiding the snake, walls and the food. */
+export function spawnPower(snake, cols, rows, walls, food, rand = Math.random) {
+  const blocked = [...snake, ...walls]
+  if (food) blocked.push(food)
+  const cell = spawnFood(blocked, cols, rows, [], rand)
+  if (!cell) return null
+  return { ...cell, kind: POWER_IDS[Math.floor(rand() * POWER_IDS.length)] }
+}
+
+/**
+ * Score for one pellet given the active combo and any x2 power-up.
+ * Combo climbs when pellets are eaten in quick succession.
+ */
+export function pelletScore(combo, doubled) {
+  return Math.max(1, combo) * (doubled ? 2 : 1)
 }

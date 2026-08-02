@@ -41,7 +41,7 @@ const APPS = [
     href: '#/snake',
     icon: '🐍',
     title: 'Snake',
-    desc: 'The old Nokia classic — monochrome LCD, three modes, high scores.',
+    desc: 'Neon arcade Snake — swipe to steer, combos, power-ups and a retro skin.',
     accent: 'blue',
   },
 ]
