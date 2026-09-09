@@ -25,6 +25,12 @@ const MODES = [
   { id: 'maze', name: 'Maze', hint: 'Obstacles in the arena' },
 ]
 
+const SPEED_OPTS = [
+  { id: 'chill', name: 'Chill', icon: '🐢' },
+  { id: 'classic', name: 'Classic', icon: '🎮' },
+  { id: 'turbo', name: 'Turbo', icon: '⚡' },
+]
+
 // Combo window: eat again within this and the multiplier climbs.
 const COMBO_MS = 2600
 const POWER_EVERY = 4 // pellets between power-up spawns
@@ -89,7 +95,7 @@ export default function SnakeGame() {
   const [phase, setPhase] = useState('menu') // menu | playing | paused | over
   const [high, setHigh] = useState(() => loadJSON(HS_KEY, { classic: 0, wrap: 0, maze: 0 }))
   const [prefs, setPrefs] = useState(() =>
-    loadJSON(PREF_KEY, { skin: 'neon', haptics: true, zen: false }),
+    loadJSON(PREF_KEY, { skin: 'neon', haptics: true, zen: false, speed: 'classic' }),
   )
   // Mirrored into React state only for the HUD; the loop reads the refs.
   const [hud, setHud] = useState({ score: 0, combo: 0, powers: {}, len: 3 })
@@ -158,13 +164,13 @@ export default function SnakeGame() {
     g.pelletsSincePower = 0
     g.boluses = []
     g.shake = 0
-    g.dur = tickMs(0)
+    g.dur = tickMs(0, prefs.speed)
     g.anim = 0
     g.lastFrame = 0
     g.lastTick = performance.now()
     setHud({ score: 0, combo: 0, powers: {}, len: 3 })
     setPhase('playing')
-  }, [wallsFor])
+  }, [wallsFor, prefs.speed])
 
   const turn = useCallback(
     (dir) => {
@@ -222,7 +228,7 @@ export default function SnakeGame() {
         if (g.combo && now - g.lastAte > COMBO_MS) g.combo = 0
 
         const slow = !!g.active.slow
-        const dur = tickMs(g.game.score) * (slow ? 1.7 : 1)
+        const dur = tickMs(g.game.score, prefs.speed) * (slow ? 1.7 : 1)
         g.dur = dur
 
         if (now - g.lastTick >= dur) {
@@ -495,7 +501,7 @@ export default function SnakeGame() {
 
     raf = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf)
-  }, [prefs.skin, prefs.haptics, wallsFor])
+  }, [prefs.skin, prefs.haptics, prefs.speed, wallsFor])
 
   // ---------------- input ----------------
   useEffect(() => {
@@ -700,6 +706,24 @@ export default function SnakeGame() {
           >
             <b>{m.name}</b>
             <span>{high[m.id]}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="sn2-speed">
+        <span className="sn2-speed-label">SPEED</span>
+        {SPEED_OPTS.map((sp) => (
+          <button
+            key={sp.id}
+            className={`sn2-speed-btn ${prefs.speed === sp.id ? 'active' : ''}`}
+            onClick={() => {
+              setPrefs((p) => ({ ...p, speed: sp.id }))
+              // Changing speed resets to the menu, since the curve differs.
+              setPhase('menu')
+              G.current.game = null
+            }}
+          >
+            {sp.icon} {sp.name}
           </button>
         ))}
       </div>

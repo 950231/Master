@@ -92,9 +92,34 @@ export function step(state, cols, rows, opts = {}) {
   }
 }
 
-/** Tick interval in ms — speeds up as the score climbs, with a floor. */
-export function tickMs(score, base = 140, floor = 55) {
-  return Math.max(floor, base - Math.floor(score / 3) * 8)
+/**
+ * Speed presets. Each sets where the snake starts, how low it can go, and how
+ * many pellets it takes to get there.
+ *
+ * The old curve hit its floor by ~33 pellets, so the game became
+ * uncontrollable right as a combo pushed the score past 50 — which is exactly
+ * where players kept dying. These curves stay reactable far longer: even
+ * Turbo does not reach its floor until 90 pellets, and Classic keeps a 70ms
+ * floor (about 14 steps/second) that a thumb can actually follow.
+ */
+export const SPEEDS = {
+  chill: { base: 165, floor: 95, span: 120 },
+  classic: { base: 150, floor: 70, span: 100 },
+  turbo: { base: 130, floor: 52, span: 90 },
+}
+export const SPEED_IDS = Object.keys(SPEEDS)
+
+/**
+ * Tick interval in ms. Slows the ramp with a square-root curve: most of the
+ * speed-up happens early, where it is exciting, then it eases off so late
+ * game is a test of skill instead of a coin-flip. `score` is the raw pellet
+ * count, never the combo-inflated display score, so a lucky combo does not
+ * jump the difficulty.
+ */
+export function tickMs(score, speed = 'classic') {
+  const s = SPEEDS[speed] || SPEEDS.classic
+  const t = Math.min(1, Math.sqrt(Math.max(0, score) / s.span))
+  return Math.round(s.base - (s.base - s.floor) * t)
 }
 
 /** Level shown on the display, one per 5 points. */

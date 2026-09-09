@@ -320,6 +320,39 @@
   padding: 4px 10px;
 }
 
+/* ---------- speed selector ---------- */
+.sn2-speed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  flex: none;
+}
+.sn2-speed-label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: var(--text-faint);
+  margin-right: 2px;
+}
+.sn2-speed-btn {
+  flex: 1;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 12px;
+  padding: 9px 4px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+}
+.sn2-speed-btn.active {
+  color: var(--text);
+  border-color: var(--neon2);
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.25);
+}
+
 /* ---------- wide + short (tablet held landscape) ----------
    Stacked controls would leave the arena only a sliver of height, so the HUD
    and controls move into a side rail and the stage takes the full height. */
@@ -328,15 +361,16 @@
     max-width: none;
     display: grid;
     grid-template-columns: 1fr clamp(190px, 24%, 270px);
-    grid-template-rows: auto auto auto auto 1fr;
+    grid-template-rows: auto auto auto auto auto 1fr;
     column-gap: 18px;
   }
   .sn2-top { grid-area: 1 / 1 / 2 / 3; }
-  .sn2-stage { grid-area: 2 / 1 / 6 / 2; }
+  .sn2-stage { grid-area: 2 / 1 / 7 / 2; }
   .sn2-hud { grid-area: 2 / 2 / 3 / 3; margin-bottom: 0; }
   .sn2-actions { grid-area: 3 / 2 / 4 / 3; }
   .sn2-modes { grid-area: 4 / 2 / 5 / 3; }
-  .sn2-legend { grid-area: 5 / 2 / 6 / 3; align-self: start; }
+  .sn2-speed { grid-area: 5 / 2 / 6 / 3; }
+  .sn2-legend { grid-area: 6 / 2 / 7 / 3; align-self: start; }
 }
 
 /* ---------- zen: hand the chrome's space back to the arena ---------- */
@@ -349,6 +383,7 @@
 }
 .sn2.zen .sn2-title,
 .sn2.zen .sn2-modes,
+.sn2.zen .sn2-speed,
 .sn2.zen .sn2-legend {
   display: none;
 }
