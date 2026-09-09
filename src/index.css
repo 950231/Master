@@ -1,0 +1,122 @@
+:root {
+  --bg: #0b1120;
+  --bg-elevated: #0f172a;
+  --panel: #111c31;
+  --panel-2: #16233c;
+  --border: #1e293b;
+  --border-light: #263449;
+  --text: #e2e8f0;
+  --text-dim: #94a3b8;
+  --text-faint: #64748b;
+  --green: #22c55e;
+  --green-dim: #16a34a;
+  --red: #ef4444;
+  --red-dim: #dc2626;
+  --blue: #3b82f6;
+  --accent: #38bdf8;
+  /* Sudoku cell highlight backgrounds (themeable). */
+  --hl-peer: #131f36;
+  --hl-same: #1d3050;
+  --hl-selected: #26456f;
+  --radius: 12px;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+/* ---------- Themes (applied via data-theme on <html>) ---------- */
+:root[data-theme='slate'] {
+  --bg: #0f1115;
+  --bg-elevated: #151821;
+  --panel: #1a1e2a;
+  --panel-2: #222735;
+  --border: #252b3a;
+  --border-light: #323a4d;
+  --text: #e5e7eb;
+  --text-dim: #9aa4b2;
+  --text-faint: #6b7280;
+  --accent: #818cf8;
+  --hl-peer: #1c2233;
+  --hl-same: #2a3350;
+  --hl-selected: #374468;
+}
+:root[data-theme='ocean'] {
+  --bg: #04181c;
+  --bg-elevated: #062329;
+  --panel: #08303a;
+  --panel-2: #0b3d49;
+  --border: #0e4552;
+  --border-light: #136173;
+  --text: #e0f2f1;
+  --text-dim: #8bb8bd;
+  --text-faint: #5b8a90;
+  --accent: #2dd4bf;
+  --hl-peer: #083f42;
+  --hl-same: #0c5a55;
+  --hl-selected: #0f6f68;
+}
+:root[data-theme='grape'] {
+  --bg: #160f24;
+  --bg-elevated: #1e1533;
+  --panel: #271a44;
+  --panel-2: #332255;
+  --border: #3a2963;
+  --border-light: #4c3780;
+  --text: #ece7f7;
+  --text-dim: #b3a5d1;
+  --text-faint: #7d6ea3;
+  --accent: #c084fc;
+  --hl-peer: #2a1d47;
+  --hl-same: #3d2a63;
+  --hl-selected: #4d3580;
+}
+:root[data-theme='light'] {
+  --bg: #eef2f7;
+  --bg-elevated: #ffffff;
+  --panel: #ffffff;
+  --panel-2: #eef2f7;
+  --border: #e2e8f0;
+  --border-light: #cbd5e1;
+  --text: #0f172a;
+  --text-dim: #475569;
+  --text-faint: #94a3b8;
+  --green: #16a34a;
+  --red: #dc2626;
+  --accent: #2563eb;
+  --hl-peer: #eef4fb;
+  --hl-same: #dce9fc;
+  --hl-selected: #c5daff;
+  --shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+body {
+  background: radial-gradient(
+      1200px 600px at 80% -10%,
+      rgba(56, 189, 248, 0.08),
+      transparent
+    ),
+    var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+.tone-pos {
+  color: var(--green);
+}
+.tone-neg {
+  color: var(--red);
+}
+.tone-neutral {
+  color: var(--text);
+}

@@ -1,0 +1,1484 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import ThemePicker from '../ThemePicker.jsx'
+import './chart.css'
+
+const BASE = import.meta.env.BASE_URL || '/'
+
+const TIMEFRAMES = [
+  { id: '1w', label: '1W', file: 'nifty/1w.json' },
+  { id: '1d', label: '1D', file: 'nifty/1d.json' },
+  { id: '1h', label: '1H', file: 'nifty/1h.json' },
+  { id: '30m', label: '30m', file: 'nifty/30m.json' },
+  { id: '15m', label: '15m', file: 'nifty/15m.json' },
+  { id: '5m', label: '5m', file: null }, // per-year, chosen at runtime
+]
+
+// Replay speeds expressed as milliseconds between candles.
+const SPEEDS = [
+  { label: '0.25×', ms: 2000 },
+  { label: '0.5×', ms: 1000 },
+  { label: '1×', ms: 500 },
+  { label: '2×', ms: 250 },
+  { label: '5×', ms: 100 },
+  { label: '10×', ms: 40 },
+]
+
+const TOOLS = [
+  { id: 'cursor', icon: '✛', name: 'Cursor / pan' },
+  { id: 'trend', icon: '╱', name: 'Trend line' },
+  { id: 'hline', icon: '─', name: 'Horizontal line' },
+  { id: 'rect', icon: '▭', name: 'Rectangle' },
+  { id: 'fib', icon: '≡', name: 'Fib retracement' },
+  { id: 'arrow', icon: '↗', name: 'Arrow' },
+  { id: 'brush', icon: '✎', name: 'Free draw' },
+  { id: 'measure', icon: '📏', name: 'Measure' },
+]
+
+const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]
+
+const MIN_BARS = 20
+const MAX_BARS = 3000
+// Right gutter holds the price axis; bottom strip holds the time axis.
+const PAD = { l: 8, r: 72, t: 12, b: 30 }
+
+const fmtPrice = (p) =>
+  p.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+/** Bars are IST wall-clock; render them back in IST regardless of viewer TZ. */
+function istParts(epochSec) {
+  const d = new Date((epochSec + 5.5 * 3600) * 1000)
+  return {
+    dd: String(d.getUTCDate()).padStart(2, '0'),
+    mon: d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }),
+    yr: d.getUTCFullYear(),
+    hh: String(d.getUTCHours()).padStart(2, '0'),
+    mi: String(d.getUTCMinutes()).padStart(2, '0'),
+    dayKey: Math.floor((epochSec + 5.5 * 3600) / 86400),
+  }
+}
+
+function fmtDate(epochSec, tf) {
+  const p = istParts(epochSec)
+  if (tf === '1d' || tf === '1w') return `${p.dd} ${p.mon} ${p.yr}`
+  return `${p.dd} ${p.mon} ${p.yr}, ${p.hh}:${p.mi}`
+}
+
+function sma(closes, period) {
+  const out = new Array(closes.length).fill(null)
+  let sum = 0
+  for (let i = 0; i < closes.length; i++) {
+    sum += closes[i]
+    if (i >= period) sum -= closes[i - period]
+    if (i >= period - 1) out[i] = sum / period
+  }
+  return out
+}
+
+/** Human-readable gap between two bar timestamps, e.g. "2h 15m" or "3d". */
+function fmtSpan(sec) {
+  const a = Math.abs(sec)
+  if (a < 3600) return `${Math.round(a / 60)}m`
+  if (a < 86400) {
+    const h = Math.floor(a / 3600)
+    const m = Math.round((a % 3600) / 60)
+    return m ? `${h}h ${m}m` : `${h}h`
+  }
+  const d = Math.floor(a / 86400)
+  if (d < 30) return `${d}d`
+  const mo = Math.floor(d / 30)
+  return mo < 12 ? `${mo}mo` : `${(d / 365).toFixed(1)}y`
+}
+
+const cssVar = (name, fallback) =>
+  getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
+
+const uid = () => `d${Date.now()}${Math.random().toString(36).slice(2, 7)}`
+
+export default function NiftyChart() {
+  const [tf, setTf] = useState('1d')
+  const [year, setYear] = useState(null)
+  const [years, setYears] = useState([])
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [showMA, setShowMA] = useState(true)
+
+  const [view, setView] = useState({ start: 0, count: 200 })
+  const [cursor, setCursor] = useState(null) // {i, price, x, y}
+  // `picking` is the TradingView-style 'choose your start bar' phase.
+  const [replay, setReplay] = useState({ active: false, at: 0, playing: false, ms: 500, picking: false })
+
+  // Price scale: `zoom` multiplies the auto-fitted span, `offset` shifts it.
+  // auto=true keeps the classic fit-to-visible-candles behaviour.
+  const [priceScale, setPriceScale] = useState({ zoom: 1, offset: 0, auto: true })
+
+  // Paper trading during replay: one open position plus a log of closed ones.
+  const [pos, setPos] = useState(null)
+  const [tradeLog, setTradeLog] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('nifty.replayTrades.v1') || '[]')
+    } catch {
+      return []
+    }
+  })
+  const [risk, setRisk] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('nifty.replayRisk.v1') || '{"pts":30,"r":2}')
+    } catch {
+      return { pts: 30, r: 2 }
+    }
+  })
+
+  const [tool, setTool] = useState('cursor')
+  const [drawings, setDrawings] = useState([])
+  const [pending, setPending] = useState(null) // in-progress drawing
+  const [selected, setSelected] = useState(null)
+
+  const canvasRef = useRef(null)
+  const wrapRef = useRef(null)
+  const scaleRef = useRef(null) // screen<->data mapping produced by draw()
+
+  // Mirrors for native listeners, which would otherwise close over stale state.
+  const viewRef = useRef(view)
+  const dataRef = useRef(data)
+  const replayRef = useRef(replay)
+  const toolRef = useRef(tool)
+  const priceScaleRef = useRef(priceScale)
+  const posRef = useRef(pos)
+  const pendingRef = useRef(pending)
+  useEffect(() => void (viewRef.current = view), [view])
+  useEffect(() => void (dataRef.current = data), [data])
+  useEffect(() => void (replayRef.current = replay), [replay])
+  useEffect(() => void (toolRef.current = tool), [tool])
+  useEffect(() => void (priceScaleRef.current = priceScale), [priceScale])
+  useEffect(() => void (posRef.current = pos), [pos])
+  useEffect(() => void (pendingRef.current = pending), [pending])
+
+  const storeKey = `nifty.drawings.${tf}${tf === '5m' ? '.' + year : ''}`
+
+  useEffect(() => {
+    fetch(`${BASE}nifty/index.json`)
+      .then((r) => r.json())
+      .then((idx) => {
+        setYears(idx.years || [])
+        setYear((y) => y || (idx.years || []).at(-1) || null)
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    const spec = TIMEFRAMES.find((t) => t.id === tf)
+    const file = spec.file || (year ? `nifty/5m-${year}.json` : null)
+    if (!file) return
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    fetch(`${BASE}${file}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
+      .then((d) => {
+        if (cancelled) return
+        setData(d)
+        const count = Math.min(200, d.count)
+        setView({ start: Math.max(0, d.count - count), count })
+        setReplay((r) => ({ ...r, active: false, playing: false, picking: false, at: 0 }))
+        setPriceScale({ zoom: 1, offset: 0, auto: true })
+        setLoading(false)
+      })
+      .catch((e) => {
+        if (cancelled) return
+        setError(e.message)
+        setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [tf, year])
+
+  // Drawings are stored per timeframe so they stay anchored to the right bars.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(storeKey)
+      setDrawings(raw ? JSON.parse(raw) : [])
+    } catch {
+      setDrawings([])
+    }
+    setSelected(null)
+    setPending(null)
+  }, [storeKey])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(storeKey, JSON.stringify(drawings))
+    } catch {
+      /* storage full — keep them in memory */
+    }
+  }, [drawings, storeKey])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('nifty.replayTrades.v1', JSON.stringify(tradeLog.slice(0, 300)))
+    } catch {
+      /* ignore */
+    }
+  }, [tradeLog])
+  useEffect(() => {
+    try {
+      localStorage.setItem('nifty.replayRisk.v1', JSON.stringify(risk))
+    } catch {
+      /* ignore */
+    }
+  }, [risk])
+
+  const ma20 = useMemo(() => (data && showMA ? sma(data.c, 20) : null), [data, showMA])
+  const ma50 = useMemo(() => (data && showMA ? sma(data.c, 50) : null), [data, showMA])
+
+  const revealEnd =
+    replay.active && !replay.picking && data ? Math.min(data.count, replay.at + 1) : data?.count ?? 0
+
+  // ---------------- drawing ----------------
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current
+    const wrap = wrapRef.current
+    if (!canvas || !wrap || !data) return
+
+    const dpr = window.devicePixelRatio || 1
+    const w = wrap.clientWidth
+    const h = wrap.clientHeight
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+      canvas.width = Math.round(w * dpr)
+      canvas.height = Math.round(h * dpr)
+      canvas.style.width = w + 'px'
+      canvas.style.height = h + 'px'
+    }
+    const ctx = canvas.getContext('2d')
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, w, h)
+
+    const plotW = w - PAD.l - PAD.r
+    const plotH = h - PAD.t - PAD.b
+    if (plotW <= 0 || plotH <= 0) return
+
+    const start = Math.max(0, Math.floor(view.start))
+    const end = Math.min(revealEnd, start + view.count)
+    const slotN = view.count
+
+    const grid = cssVar('--border', '#1e293b')
+    const gridLight = cssVar('--border-light', '#263449')
+    const text = cssVar('--text-faint', '#64748b')
+    const textStrong = cssVar('--text', '#e2e8f0')
+    const panel = cssVar('--bg-elevated', '#0f172a')
+    const up = cssVar('--green', '#22c55e')
+    const down = cssVar('--red', '#ef4444')
+    const accent = cssVar('--accent', '#38bdf8')
+
+    const barW = plotW / slotN
+    const xOf = (i) => PAD.l + (i - start) * barW + barW / 2
+
+    let lo = Infinity
+    let hi = -Infinity
+    for (let i = start; i < end; i++) {
+      if (data.l[i] < lo) lo = data.l[i]
+      if (data.h[i] > hi) hi = data.h[i]
+      if (ma50 && ma50[i] != null) {
+        lo = Math.min(lo, ma50[i])
+        hi = Math.max(hi, ma50[i])
+      }
+    }
+    if (!isFinite(lo) || !isFinite(hi)) return
+    const span = hi - lo || 1
+    lo -= span * 0.06
+    hi += span * 0.06
+    // Manual vertical zoom/pan expands or shifts the auto-fitted range.
+    const mid = (lo + hi) / 2 + priceScale.offset
+    const half = ((hi - lo) / 2) * priceScale.zoom
+    lo = mid - half
+    hi = mid + half
+    const yOf = (p) => PAD.t + ((hi - p) / (hi - lo)) * plotH
+    const priceAt = (y) => hi - ((y - PAD.t) / plotH) * (hi - lo)
+    const idxAtX = (x) => Math.round(view.start + (x - PAD.l - barW / 2) / barW)
+
+    scaleRef.current = { start, end, barW, lo, hi, plotW, plotH, xOf, yOf, priceAt, idxAtX, w, h }
+
+    // ---- price grid + axis ----
+    ctx.font = '11px system-ui, sans-serif'
+    ctx.lineWidth = 1
+    ctx.textBaseline = 'middle'
+    for (let i = 0; i <= 6; i++) {
+      const p = lo + ((hi - lo) * i) / 6
+      const y = Math.round(yOf(p)) + 0.5
+      ctx.strokeStyle = grid
+      ctx.beginPath()
+      ctx.moveTo(PAD.l, y)
+      ctx.lineTo(PAD.l + plotW, y)
+      ctx.stroke()
+      ctx.fillStyle = text
+      ctx.fillText(fmtPrice(p), PAD.l + plotW + 8, y)
+    }
+
+    // ---- time axis: labels sized to fit, with day breaks called out ----
+    const intraday = tf !== '1d' && tf !== '1w'
+    const axisY = PAD.t + plotH
+    ctx.strokeStyle = gridLight
+    ctx.beginPath()
+    ctx.moveTo(PAD.l, axisY + 0.5)
+    ctx.lineTo(PAD.l + plotW, axisY + 0.5)
+    ctx.stroke()
+
+    ctx.textBaseline = 'top'
+    const minGapPx = 62
+    const step = Math.max(1, Math.ceil(minGapPx / barW))
+    let prevDay = end > start ? istParts(data.t[Math.max(start - 1, 0)]).dayKey : null
+    // Track the last drawn label so ticks can never overlap — on daily bars
+    // every candle is a new day, so day breaks alone are not a safe anchor.
+    let lastLabelX = -Infinity
+    for (let i = start; i < end; i++) {
+      const p = istParts(data.t[i])
+      const newDay = p.dayKey !== prevDay
+      prevDay = p.dayKey
+      // Day boundaries are preferred anchors on intraday charts; otherwise
+      // fall back to a regular step.
+      const candidate = (intraday && newDay) || (i - start) % step === 0
+      if (!candidate) continue
+
+      const x = xOf(i)
+      if (x < PAD.l + 12 || x > PAD.l + plotW - 12) continue
+      if (x - lastLabelX < minGapPx) continue
+      lastLabelX = x
+
+      const label = !intraday
+        ? `${p.dd} ${p.mon}`
+        : newDay
+          ? `${p.dd} ${p.mon}`
+          : `${p.hh}:${p.mi}`
+
+      // vertical grid line + tick
+      ctx.strokeStyle = newDay && intraday ? gridLight : grid
+      ctx.beginPath()
+      ctx.moveTo(Math.round(x) + 0.5, PAD.t)
+      ctx.lineTo(Math.round(x) + 0.5, axisY + 4)
+      ctx.stroke()
+
+      ctx.fillStyle = newDay && intraday ? textStrong : text
+      const tw = ctx.measureText(label).width
+      ctx.fillText(label, x - tw / 2, axisY + 7)
+    }
+
+    // ---- candles ----
+    const bodyW = Math.max(1, Math.min(barW * 0.7, 14))
+    const thin = barW < 3
+    for (let i = start; i < end; i++) {
+      const o = data.o[i]
+      const c = data.c[i]
+      const col = c >= o ? up : down
+      const x = xOf(i)
+      ctx.strokeStyle = col
+      ctx.fillStyle = col
+      ctx.beginPath()
+      ctx.moveTo(Math.round(x) + 0.5, yOf(data.h[i]))
+      ctx.lineTo(Math.round(x) + 0.5, yOf(data.l[i]))
+      ctx.stroke()
+      if (!thin) {
+        const yo = yOf(o)
+        const yc = yOf(c)
+        ctx.fillRect(x - bodyW / 2, Math.min(yo, yc), bodyW, Math.max(1, Math.abs(yc - yo)))
+      }
+    }
+
+    // ---- moving averages ----
+    const drawMA = (series, color) => {
+      if (!series) return
+      ctx.strokeStyle = color
+      ctx.lineWidth = 1.5
+      ctx.beginPath()
+      let started = false
+      for (let i = start; i < end; i++) {
+        const v = series[i]
+        if (v == null) continue
+        const x = xOf(i)
+        const y = yOf(v)
+        started ? ctx.lineTo(x, y) : (ctx.moveTo(x, y), (started = true))
+      }
+      ctx.stroke()
+      ctx.lineWidth = 1
+    }
+    drawMA(ma20, accent)
+    drawMA(ma50, '#f59e0b')
+
+    // ---- last price line + tag (TradingView-style) ----
+    if (end > start) {
+      const li = end - 1
+      const lp = data.c[li]
+      const ly = yOf(lp)
+      const rising = lp >= data.o[li]
+      const col = rising ? up : down
+      ctx.strokeStyle = col
+      ctx.setLineDash([2, 3])
+      ctx.beginPath()
+      ctx.moveTo(PAD.l, ly)
+      ctx.lineTo(PAD.l + plotW, ly)
+      ctx.stroke()
+      ctx.setLineDash([])
+      const label = fmtPrice(lp)
+      const tw = ctx.measureText(label).width
+      ctx.fillStyle = col
+      ctx.fillRect(PAD.l + plotW + 2, ly - 9, tw + 12, 18)
+      ctx.fillStyle = '#04121d'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(label, PAD.l + plotW + 8, ly)
+    }
+
+    // ---- user drawings ----
+    const all = pending ? [...drawings, pending] : drawings
+    for (const d of all) {
+      const isSel = d.id === selected
+      const color = d.color || accent
+      ctx.strokeStyle = color
+      ctx.lineWidth = isSel ? 2.5 : 1.5
+      const x1 = xOf(d.p1.i)
+      const y1 = yOf(d.p1.price)
+      const x2 = d.p2 ? xOf(d.p2.i) : x1
+      const y2 = d.p2 ? yOf(d.p2.price) : y1
+
+      if (d.type === 'hline') {
+        ctx.beginPath()
+        ctx.moveTo(PAD.l, y1)
+        ctx.lineTo(PAD.l + plotW, y1)
+        ctx.stroke()
+        const label = fmtPrice(d.p1.price)
+        const tw = ctx.measureText(label).width
+        ctx.fillStyle = color
+        ctx.fillRect(PAD.l + plotW + 2, y1 - 9, tw + 12, 18)
+        ctx.fillStyle = '#04121d'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(label, PAD.l + plotW + 8, y1)
+      } else if (d.type === 'trend') {
+        ctx.beginPath()
+        ctx.moveTo(x1, y1)
+        ctx.lineTo(x2, y2)
+        ctx.stroke()
+      } else if (d.type === 'arrow') {
+        ctx.beginPath()
+        ctx.moveTo(x1, y1)
+        ctx.lineTo(x2, y2)
+        ctx.stroke()
+        // arrowhead at the end point
+        const ang = Math.atan2(y2 - y1, x2 - x1)
+        const head = 11
+        ctx.beginPath()
+        ctx.moveTo(x2, y2)
+        ctx.lineTo(x2 - head * Math.cos(ang - Math.PI / 7), y2 - head * Math.sin(ang - Math.PI / 7))
+        ctx.lineTo(x2 - head * Math.cos(ang + Math.PI / 7), y2 - head * Math.sin(ang + Math.PI / 7))
+        ctx.closePath()
+        ctx.fillStyle = color
+        ctx.fill()
+      } else if (d.type === 'brush') {
+        const pts = d.points || []
+        if (pts.length > 1) {
+          ctx.beginPath()
+          ctx.lineJoin = 'round'
+          ctx.lineCap = 'round'
+          ctx.moveTo(xOf(pts[0].i), yOf(pts[0].price))
+          for (let k = 1; k < pts.length; k++) ctx.lineTo(xOf(pts[k].i), yOf(pts[k].price))
+          ctx.stroke()
+        }
+      } else if (d.type === 'measure') {
+        const rising = (d.p2?.price ?? d.p1.price) >= d.p1.price
+        const mc = rising ? up : down
+        const rx = Math.min(x1, x2)
+        const ry = Math.min(y1, y2)
+        const rw = Math.abs(x2 - x1)
+        const rh = Math.abs(y2 - y1)
+        ctx.fillStyle = mc + '22'
+        ctx.fillRect(rx, ry, rw, rh)
+        ctx.strokeStyle = mc
+        ctx.strokeRect(rx, ry, rw, rh)
+
+        // direction arrow down the middle
+        const mx = (x1 + x2) / 2
+        ctx.beginPath()
+        ctx.moveTo(mx, y1)
+        ctx.lineTo(mx, y2)
+        ctx.stroke()
+        const ang = y2 >= y1 ? Math.PI / 2 : -Math.PI / 2
+        const head = 9
+        ctx.beginPath()
+        ctx.moveTo(mx, y2)
+        ctx.lineTo(mx - head * Math.cos(ang - Math.PI / 7), y2 - head * Math.sin(ang - Math.PI / 7))
+        ctx.lineTo(mx - head * Math.cos(ang + Math.PI / 7), y2 - head * Math.sin(ang + Math.PI / 7))
+        ctx.closePath()
+        ctx.fillStyle = mc
+        ctx.fill()
+
+        // readout: price change, %, bar count and elapsed time
+        const dp = (d.p2?.price ?? d.p1.price) - d.p1.price
+        const pct = d.p1.price ? (dp / d.p1.price) * 100 : 0
+        const bars = Math.abs((d.p2?.i ?? d.p1.i) - d.p1.i)
+        const ia = Math.max(0, Math.min(data.count - 1, d.p1.i))
+        const ib = Math.max(0, Math.min(data.count - 1, d.p2?.i ?? d.p1.i))
+        const l1 = `${dp >= 0 ? '+' : ''}${fmtPrice(dp)}  (${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%)`
+        const l2 = `${bars} bars · ${fmtSpan(data.t[ib] - data.t[ia])}`
+        ctx.font = 'bold 12px system-ui, sans-serif'
+        const bw = Math.max(ctx.measureText(l1).width, ctx.measureText(l2).width) + 16
+        const bx = Math.min(Math.max(PAD.l, mx - bw / 2), PAD.l + plotW - bw)
+        const by = (y2 >= y1 ? ry + rh + 6 : ry - 44)
+        ctx.fillStyle = mc
+        ctx.fillRect(bx, by, bw, 38)
+        ctx.fillStyle = '#04121d'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(l1, bx + 8, by + 12)
+        ctx.font = '11px system-ui, sans-serif'
+        ctx.fillText(l2, bx + 8, by + 27)
+        ctx.font = '11px system-ui, sans-serif'
+      } else if (d.type === 'rect') {
+        ctx.fillStyle = color + '22'
+        ctx.fillRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1))
+        ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1))
+      } else if (d.type === 'fib') {
+        const pTop = Math.max(d.p1.price, d.p2?.price ?? d.p1.price)
+        const pBot = Math.min(d.p1.price, d.p2?.price ?? d.p1.price)
+        const xa = Math.min(x1, x2)
+        const xb = Math.max(x1, x2)
+        ctx.textBaseline = 'bottom'
+        FIB_LEVELS.forEach((lv, k) => {
+          const price = pTop - (pTop - pBot) * lv
+          const y = yOf(price)
+          ctx.strokeStyle = k === 0 || k === FIB_LEVELS.length - 1 ? color : color + 'aa'
+          ctx.setLineDash(k === 0 || k === FIB_LEVELS.length - 1 ? [] : [4, 4])
+          ctx.beginPath()
+          ctx.moveTo(xa, y)
+          ctx.lineTo(Math.max(xb, xa + 40), y)
+          ctx.stroke()
+          ctx.setLineDash([])
+          ctx.fillStyle = color
+          ctx.fillText(`${(lv * 100).toFixed(1)}%  ${fmtPrice(price)}`, xa + 4, y - 2)
+        })
+        ctx.textBaseline = 'middle'
+      }
+
+      if (isSel && d.p2) {
+        ctx.fillStyle = color
+        for (const [hx, hy] of [
+          [x1, y1],
+          [x2, y2],
+        ]) {
+          ctx.beginPath()
+          ctx.arc(hx, hy, 4, 0, Math.PI * 2)
+          ctx.fill()
+        }
+      }
+      ctx.lineWidth = 1
+    }
+
+    // ---- open paper position: entry / stop / target ----
+    if (pos) {
+      const rows = [
+        [pos.entry, accent, 'Entry'],
+        [pos.sl, down, 'SL'],
+      ]
+      if (pos.tp != null) rows.push([pos.tp, up, 'Target'])
+      for (const [p, col, tag] of rows) {
+        const y = yOf(p)
+        ctx.strokeStyle = col
+        ctx.setLineDash([3, 3])
+        ctx.beginPath()
+        ctx.moveTo(PAD.l, y)
+        ctx.lineTo(PAD.l + plotW, y)
+        ctx.stroke()
+        ctx.setLineDash([])
+        const label = `${tag} ${fmtPrice(p)}`
+        const tw = ctx.measureText(label).width
+        ctx.fillStyle = col
+        ctx.fillRect(PAD.l + 2, y - 8, tw + 10, 16)
+        ctx.fillStyle = '#04121d'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(label, PAD.l + 7, y)
+      }
+      // entry arrow on the bar the trade was taken
+      if (pos.entryIdx >= start && pos.entryIdx < end) {
+        const x = xOf(pos.entryIdx)
+        const y = yOf(pos.entry)
+        ctx.fillStyle = pos.side === 'long' ? up : down
+        ctx.beginPath()
+        const s2 = pos.side === 'long' ? 1 : -1
+        ctx.moveTo(x, y)
+        ctx.lineTo(x - 6, y + 12 * s2)
+        ctx.lineTo(x + 6, y + 12 * s2)
+        ctx.closePath()
+        ctx.fill()
+      }
+    }
+
+    // ---- replay start-picker: red line that follows the cursor ----
+    if (replay.active && replay.picking && cursor?.x != null) {
+      const cx = Math.max(PAD.l, Math.min(PAD.l + plotW, cursor.x))
+      ctx.strokeStyle = down
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.moveTo(cx, PAD.t)
+      ctx.lineTo(cx, PAD.t + plotH)
+      ctx.stroke()
+      ctx.lineWidth = 1
+      const msg = 'Click to start replay here'
+      ctx.font = 'bold 12px system-ui, sans-serif'
+      const mw = ctx.measureText(msg).width
+      const bx = Math.max(PAD.l + 4, Math.min(cx + 8, PAD.l + plotW - mw - 14))
+      ctx.fillStyle = down
+      ctx.fillRect(bx, PAD.t + 6, mw + 12, 22)
+      ctx.fillStyle = '#fff'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(msg, bx + 6, PAD.t + 17)
+      ctx.font = '11px system-ui, sans-serif'
+    }
+
+    // ---- replay "now" marker ----
+    if (replay.active && !replay.picking && end > start) {
+      const x = xOf(end - 1) + barW / 2
+      ctx.strokeStyle = accent
+      ctx.setLineDash([3, 3])
+      ctx.beginPath()
+      ctx.moveTo(x, PAD.t)
+      ctx.lineTo(x, PAD.t + plotH)
+      ctx.stroke()
+      ctx.setLineDash([])
+    }
+
+    // ---- crosshair with axis tags ----
+    if (cursor && cursor.x != null) {
+      const cx = Math.max(PAD.l, Math.min(PAD.l + plotW, cursor.x))
+      const cy = Math.max(PAD.t, Math.min(PAD.t + plotH, cursor.y))
+      ctx.strokeStyle = text
+      ctx.setLineDash([4, 4])
+      ctx.beginPath()
+      ctx.moveTo(cx, PAD.t)
+      ctx.lineTo(cx, PAD.t + plotH)
+      ctx.moveTo(PAD.l, cy)
+      ctx.lineTo(PAD.l + plotW, cy)
+      ctx.stroke()
+      ctx.setLineDash([])
+
+      // price tag on the right axis
+      const pLabel = fmtPrice(priceAt(cy))
+      const pw = ctx.measureText(pLabel).width
+      ctx.fillStyle = gridLight
+      ctx.fillRect(PAD.l + plotW + 2, cy - 9, pw + 12, 18)
+      ctx.fillStyle = textStrong
+      ctx.textBaseline = 'middle'
+      ctx.fillText(pLabel, PAD.l + plotW + 8, cy)
+
+      // time tag on the bottom axis
+      if (cursor.i != null && cursor.i >= 0 && cursor.i < data.count) {
+        const p = istParts(data.t[cursor.i])
+        const tLabel = intraday ? `${p.dd} ${p.mon} ${p.hh}:${p.mi}` : `${p.dd} ${p.mon} ${p.yr}`
+        const tw = ctx.measureText(tLabel).width
+        const bx = Math.max(PAD.l, Math.min(cx - tw / 2 - 6, PAD.l + plotW - tw - 12))
+        ctx.fillStyle = gridLight
+        ctx.fillRect(bx, axisY + 3, tw + 12, 18)
+        ctx.fillStyle = textStrong
+        ctx.textBaseline = 'middle'
+        ctx.fillText(tLabel, bx + 6, axisY + 12)
+      }
+    }
+  }, [data, view, cursor, tf, ma20, ma50, replay.active, replay.picking, revealEnd, drawings, pending, selected, priceScale, pos])
+
+  useEffect(() => draw(), [draw])
+
+  useEffect(() => {
+    const onResize = () => draw()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [draw])
+
+  useEffect(() => {
+    const obs = new MutationObserver(() => draw())
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => obs.disconnect()
+  }, [draw])
+
+  // ---------------- interaction ----------------
+  // Lets hit-testing read the latest drawings without re-binding listeners.
+  const drawingsRef = useRef(drawings)
+  useEffect(() => void (drawingsRef.current = drawings), [drawings])
+
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+
+    const local = (e) => {
+      const r = el.getBoundingClientRect()
+      return { x: e.clientX - r.left, y: e.clientY - r.top }
+    }
+    const plotWidth = () => el.clientWidth - PAD.l - PAD.r
+    const plotHeight = () => el.clientHeight - PAD.t - PAD.b
+    const overPriceAxis = (clientX) =>
+      clientX - el.getBoundingClientRect().left > PAD.l + plotWidth()
+
+    const idxAt = (clientX) => {
+      const d = dataRef.current
+      const s = scaleRef.current
+      if (!d || !s) return null
+      const r = el.getBoundingClientRect()
+      const rel = clientX - r.left - PAD.l
+      if (rel < 0 || rel > s.plotW) return null
+      const v = viewRef.current
+      return Math.max(0, Math.min(d.count - 1, Math.floor(v.start + (rel / s.plotW) * v.count)))
+    }
+
+    const clampStart = (start, count) => {
+      const d = dataRef.current
+      if (!d) return 0
+      return Math.max(0, Math.min(Math.max(0, d.count - count), Math.round(start)))
+    }
+
+    const zoom = (factor, anchorIdx) => {
+      const d = dataRef.current
+      if (!d) return
+      const v = viewRef.current
+      const count = Math.round(
+        Math.max(MIN_BARS, Math.min(MAX_BARS, Math.min(d.count, v.count * factor))),
+      )
+      const anchor = anchorIdx ?? v.start + v.count / 2
+      const ratio = (anchor - v.start) / v.count
+      setView({ start: clampStart(anchor - ratio * count, count), count })
+    }
+
+    /** Data-space point under the pointer, for creating/moving drawings. */
+    const pointAt = (e) => {
+      const s = scaleRef.current
+      if (!s) return null
+      const { x, y } = local(e)
+      return { i: s.idxAtX(x), price: s.priceAt(y) }
+    }
+
+    /** Hit-test existing drawings so a tap can select one. */
+    const hitTest = (e) => {
+      const s = scaleRef.current
+      if (!s) return null
+      const { x, y } = local(e)
+      const near = 7
+      for (let k = drawingsRef.current.length - 1; k >= 0; k--) {
+        const d = drawingsRef.current[k]
+        const x1 = s.xOf(d.p1.i)
+        const y1 = s.yOf(d.p1.price)
+        if (d.type === 'hline') {
+          if (Math.abs(y - y1) <= near) return d.id
+          continue
+        }
+        if (!d.p2) continue
+        const x2 = s.xOf(d.p2.i)
+        const y2 = s.yOf(d.p2.price)
+        if (d.type === 'brush') {
+          const pts = d.points || []
+          let hit = false
+          for (let q = 1; q < pts.length && !hit; q++) {
+            const ax = s.xOf(pts[q - 1].i)
+            const ay = s.yOf(pts[q - 1].price)
+            const bx2 = s.xOf(pts[q].i)
+            const by2 = s.yOf(pts[q].price)
+            const dx = bx2 - ax
+            const dy = by2 - ay
+            const len2 = dx * dx + dy * dy || 1
+            const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / len2))
+            if (Math.hypot(x - (ax + t * dx), y - (ay + t * dy)) <= near) hit = true
+          }
+          if (hit) return d.id
+          continue
+        }
+        if (d.type === 'rect' || d.type === 'fib' || d.type === 'measure') {
+          const inX = x >= Math.min(x1, x2) - near && x <= Math.max(x1, x2) + near
+          const inY = y >= Math.min(y1, y2) - near && y <= Math.max(y1, y2) + near
+          if (inX && inY) return d.id
+        } else if (d.type === 'trend' || d.type === 'arrow') {
+          const dx = x2 - x1
+          const dy = y2 - y1
+          const len2 = dx * dx + dy * dy || 1
+          const t = Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / len2))
+          const px = x1 + t * dx
+          const py = y1 + t * dy
+          if (Math.hypot(x - px, y - py) <= near) return d.id
+        }
+      }
+      return null
+    }
+
+    let drag = null
+    let drawing = null
+    let yZoom = null
+    const pointers = new Map()
+    let pinch = null
+
+    const onPointerDown = (e) => {
+      pointers.set(e.pointerId, e)
+      if (pointers.size === 2) {
+        drag = null
+        drawing = null
+        setPending(null)
+        const [a, b] = [...pointers.values()]
+        pinch = {
+          dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1,
+          count: viewRef.current.count,
+          anchor: idxAt((a.clientX + b.clientX) / 2),
+        }
+        return
+      }
+      if (pointers.size > 2) return
+
+      // Dragging the price gutter scales the Y axis (TradingView behaviour).
+      if (overPriceAxis(e.clientX)) {
+        yZoom = { y: e.clientY, zoom: priceScaleRef.current.zoom }
+        try {
+          el.setPointerCapture?.(e.pointerId)
+        } catch {
+          /* ignore */
+        }
+        return
+      }
+
+      const activeTool = toolRef.current
+
+      if (activeTool !== 'cursor') {
+        const p = pointAt(e)
+        if (!p) return
+        if (activeTool === 'hline') {
+          setDrawings((ds) => [...ds, { id: uid(), type: 'hline', p1: p, color: cssVar('--accent', '#38bdf8') }])
+        } else if (activeTool === 'brush') {
+          drawing = { id: uid(), type: 'brush', p1: p, p2: p, points: [p], color: cssVar('--accent', '#38bdf8') }
+          setPending(drawing)
+        } else {
+          drawing = { id: uid(), type: activeTool, p1: p, p2: p, color: cssVar('--accent', '#38bdf8') }
+          setPending(drawing)
+        }
+        try {
+          el.setPointerCapture?.(e.pointerId)
+        } catch {
+          /* ignore */
+        }
+        return
+      }
+
+      // Picking the replay start consumes the click — afterwards clicks pan
+      // normally, matching TradingView (the head only moves via the controls).
+      if (replayRef.current.active && replayRef.current.picking) {
+        const i = idxAt(e.clientX)
+        if (i != null) setReplay((r) => ({ ...r, at: i, picking: false, playing: false }))
+        return
+      }
+
+      // cursor tool: select a drawing, or pan
+      const hit = hitTest(e)
+      setSelected(hit)
+      if (hit) return
+
+      drag = {
+        x: e.clientX,
+        y: e.clientY,
+        start: viewRef.current.start,
+        offset: priceScaleRef.current.offset,
+      }
+      try {
+        el.setPointerCapture?.(e.pointerId)
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const onPointerMove = (e) => {
+      if (pointers.has(e.pointerId)) pointers.set(e.pointerId, e)
+
+      if (pinch && pointers.size === 2) {
+        e.preventDefault()
+        const d = dataRef.current
+        if (!d) return
+        const [a, b] = [...pointers.values()]
+        const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1
+        const count = Math.round(
+          Math.max(MIN_BARS, Math.min(MAX_BARS, Math.min(d.count, pinch.count * (pinch.dist / dist)))),
+        )
+        const v = viewRef.current
+        const anchor = pinch.anchor ?? v.start + v.count / 2
+        const ratio = (anchor - v.start) / v.count
+        setView({ start: clampStart(anchor - ratio * count, count), count })
+        return
+      }
+
+      if (yZoom) {
+        e.preventDefault()
+        // Drag down = zoom out (wider price range), drag up = zoom in.
+        const factor = 1 + (e.clientY - yZoom.y) / 200
+        const zoom = Math.max(0.05, Math.min(20, yZoom.zoom * factor))
+        setPriceScale((ps) => ({ ...ps, zoom, auto: false }))
+        return
+      }
+
+      const { x, y } = local(e)
+      setCursor({ i: idxAt(e.clientX), price: scaleRef.current?.priceAt(y), x, y })
+
+      if (drawing) {
+        e.preventDefault()
+        const p = pointAt(e)
+        if (p) {
+          drawing =
+            drawing.type === 'brush'
+              ? { ...drawing, p2: p, points: [...drawing.points, p] }
+              : { ...drawing, p2: p }
+          setPending(drawing)
+        }
+        return
+      }
+
+      if (!drag) return
+      e.preventDefault()
+      const v = viewRef.current
+      const dxBars = ((e.clientX - drag.x) / plotWidth()) * v.count
+      setView({ start: clampStart(drag.start - dxBars, v.count), count: v.count })
+
+      // Vertical drag pans the price scale; the first such move drops auto-fit.
+      const dyPx = e.clientY - drag.y
+      if (Math.abs(dyPx) > 2) {
+        const sc = scaleRef.current
+        if (sc) {
+          const perPx = (sc.hi - sc.lo) / plotHeight()
+          setPriceScale((ps) => ({ ...ps, offset: drag.offset + dyPx * perPx, auto: false }))
+        }
+      }
+    }
+
+    const endPointer = (e) => {
+      pointers.delete(e.pointerId)
+      if (pointers.size < 2) pinch = null
+      yZoom = null
+      if (drawing) {
+        const done = drawing
+        drawing = null
+        setPending(null)
+        // Discard accidental taps that produced a zero-size shape.
+        const s = scaleRef.current
+        const tiny =
+          done.type !== 'brush' &&
+          s &&
+          Math.abs(s.xOf(done.p2.i) - s.xOf(done.p1.i)) < 4 &&
+          Math.abs(s.yOf(done.p2.price) - s.yOf(done.p1.price)) < 4
+        const emptyStroke = done.type === 'brush' && (done.points?.length ?? 0) < 2
+        if (!tiny && !emptyStroke) setDrawings((ds) => [...ds, done])
+      }
+      if (pointers.size === 0) drag = null
+      try {
+        el.releasePointerCapture?.(e.pointerId)
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const onWheel = (e) => {
+      e.preventDefault()
+      zoom(e.deltaY > 0 ? 1.15 : 1 / 1.15, idxAt(e.clientX))
+    }
+
+    const onLeave = () => setCursor(null)
+
+    // Double-clicking the price axis restores auto-fit.
+    const onDblClick = (e) => {
+      if (overPriceAxis(e.clientX)) setPriceScale({ zoom: 1, offset: 0, auto: true })
+    }
+
+    el.addEventListener('pointerdown', onPointerDown)
+    el.addEventListener('pointermove', onPointerMove, { passive: false })
+    el.addEventListener('pointerup', endPointer)
+    el.addEventListener('pointercancel', endPointer)
+    el.addEventListener('pointerleave', onLeave)
+    el.addEventListener('wheel', onWheel, { passive: false })
+    el.addEventListener('dblclick', onDblClick)
+    return () => {
+      el.removeEventListener('pointerdown', onPointerDown)
+      el.removeEventListener('pointermove', onPointerMove)
+      el.removeEventListener('pointerup', endPointer)
+      el.removeEventListener('pointercancel', endPointer)
+      el.removeEventListener('pointerleave', onLeave)
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('dblclick', onDblClick)
+    }
+  }, [])
+
+  const zoomBtn = (factor) => {
+    if (!data) return
+    const v = viewRef.current
+    const count = Math.round(
+      Math.max(MIN_BARS, Math.min(MAX_BARS, Math.min(data.count, v.count * factor))),
+    )
+    const anchor = v.start + v.count / 2
+    const ratio = (anchor - v.start) / v.count
+    const start = Math.max(0, Math.min(Math.max(0, data.count - count), Math.round(anchor - ratio * count)))
+    setView({ start, count })
+  }
+
+  // ---------------- replay engine ----------------
+  const stepReplay = useCallback((delta) => {
+    const d = dataRef.current
+    if (!d) return
+    setReplay((r) => {
+      const at = Math.max(0, Math.min(d.count - 1, r.at + delta))
+      return { ...r, at, playing: at >= d.count - 1 ? false : r.playing }
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!replay.active || replay.picking || !replay.playing || !data) return
+    const id = setInterval(() => {
+      setReplay((r) => (r.at >= data.count - 1 ? { ...r, playing: false } : { ...r, at: r.at + 1 }))
+    }, replay.ms)
+    return () => clearInterval(id)
+  }, [replay.active, replay.playing, replay.ms, data])
+
+  useEffect(() => {
+    if (!replay.active || replay.picking || !data) return
+    setView((v) => {
+      const target = replay.at
+      const rightEdge = v.start + v.count - 1
+      if (target > rightEdge - 2) {
+        const start = Math.max(0, Math.min(data.count - v.count, Math.round(target - v.count * 0.75)))
+        return start === v.start ? v : { ...v, start }
+      }
+      if (target < v.start) return { ...v, start: Math.max(0, Math.round(target - v.count * 0.25)) }
+      return v
+    })
+  }, [replay.at, replay.active, data])
+
+  /** Points and R for a position given an exit price. */
+  const pnlOf = (p, exit) => {
+    const dir = p.side === 'long' ? 1 : -1
+    const points = (exit - p.entry) * dir
+    const riskPts = Math.abs(p.entry - p.sl)
+    return { points, r: riskPts ? points / riskPts : 0 }
+  }
+
+  const closePosition = useCallback(
+    (exit, reason, atIdx) => {
+      setPos((p) => {
+        if (!p || !data) return null
+        const { points, r } = pnlOf(p, exit)
+        const closed = {
+          id: `${p.entryIdx}-${Date.now()}`,
+          tf,
+          year: tf === '5m' ? year : null,
+          side: p.side,
+          entry: p.entry,
+          sl: p.sl,
+          tp: p.tp,
+          exit,
+          reason,
+          points,
+          r,
+          entryTime: fmtDate(data.t[p.entryIdx], tf),
+          exitTime: fmtDate(data.t[Math.min(atIdx, data.count - 1)], tf),
+        }
+        setTradeLog((log) => [closed, ...log].slice(0, 300))
+        return null
+      })
+    },
+    [data, tf, year],
+  )
+
+  function openPosition(side) {
+    if (!data || !replay.active || replay.picking || pos) return
+    const i = replay.at
+    const entry = data.c[i]
+    const pts = Math.max(0.05, Number(risk.pts) || 0)
+    const sl = side === 'long' ? entry - pts : entry + pts
+    const tp = risk.r > 0 ? (side === 'long' ? entry + pts * risk.r : entry - pts * risk.r) : null
+    setPos({ side, entry, sl, tp, entryIdx: i })
+  }
+
+  // Resolve the open position against each newly revealed candle.
+  useEffect(() => {
+    if (!pos || !data || !replay.active || replay.picking) return
+    const i = replay.at
+    if (i <= pos.entryIdx) return
+    const hitSl = pos.side === 'long' ? data.l[i] <= pos.sl : data.h[i] >= pos.sl
+    const hitTp = pos.tp != null && (pos.side === 'long' ? data.h[i] >= pos.tp : data.l[i] <= pos.tp)
+    // A candle covering both is resolved as the stop — the pessimistic read,
+    // since OHLC cannot say which level traded first.
+    if (hitSl) closePosition(pos.sl, 'sl', i)
+    else if (hitTp) closePosition(pos.tp, 'target', i)
+  }, [replay.at, pos, data, replay.active, replay.picking, closePosition])
+
+  // Leaving replay or changing dataset closes any open paper trade.
+  useEffect(() => {
+    if (!replay.active && pos && data) closePosition(data.c[replay.at], 'manual', replay.at)
+  }, [replay.active]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const livePnl = pos && data ? pnlOf(pos, data.c[replay.at]) : null
+
+  const tradeStats = useMemo(() => {
+    const t = tradeLog
+    if (!t.length) return { n: 0, winRate: 0, points: 0, totalR: 0, avgR: 0, wins: 0, losses: 0 }
+    let wins = 0
+    let losses = 0
+    let points = 0
+    let totalR = 0
+    for (const x of t) {
+      if (x.r > 0) wins++
+      else if (x.r < 0) losses++
+      points += x.points
+      totalR += x.r
+    }
+    return {
+      n: t.length,
+      wins,
+      losses,
+      winRate: (wins / t.length) * 100,
+      points,
+      totalR,
+      avgR: totalR / t.length,
+    }
+  }, [tradeLog])
+
+  function toggleReplay() {
+    if (!data) return
+    if (replay.active) {
+      setReplay((r) => ({ ...r, active: false, playing: false, picking: false }))
+      setView((v) => ({ ...v, start: Math.max(0, data.count - v.count) }))
+    } else {
+      const at = Math.max(0, Math.min(data.count - 1, Math.round(view.start + view.count * 0.35)))
+      setReplay((r) => ({ ...r, active: true, playing: false, picking: true, at }))
+    }
+  }
+
+  // Keyboard: space play/pause, arrows step, delete removes selection, esc cancels tool.
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
+        e.preventDefault()
+        setDrawings((ds) => ds.filter((d) => d.id !== selected))
+        setSelected(null)
+        return
+      }
+      if (e.key === 'Escape') {
+        setTool('cursor')
+        setSelected(null)
+        return
+      }
+      if (!replay.active) return
+      if (e.key === ' ') {
+        e.preventDefault()
+        setReplay((r) => ({ ...r, playing: !r.playing }))
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        stepReplay(1)
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        stepReplay(-1)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [replay.active, stepReplay, selected])
+
+  const lastVisible = revealEnd - 1
+  const hovered = data && cursor?.i != null && cursor.i <= lastVisible && cursor.i >= 0 ? cursor.i : null
+  const readIdx = hovered ?? (lastVisible >= 0 ? lastVisible : null)
+  const change = data && readIdx > 0 ? data.c[readIdx] - data.c[readIdx - 1] : 0
+  const changePct =
+    data && readIdx > 0 && data.c[readIdx - 1] ? (change / data.c[readIdx - 1]) * 100 : 0
+
+  return (
+    <div className="chart-app">
+      <header className="ch-header">
+        <div className="ch-left">
+          <a href="#/" className="back-link">← Apps</a>
+          <ThemePicker />
+        </div>
+        <h1>NIFTY 50</h1>
+        <div className="ch-head-spacer" />
+      </header>
+
+      <div className="ch-toolbar">
+        <div className="ch-tfs">
+          {TIMEFRAMES.map((t) => (
+            <button
+              key={t.id}
+              className={`ch-tf ${tf === t.id ? 'active' : ''}`}
+              onClick={() => setTf(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {tf === '5m' && years.length > 0 && (
+          <select className="ch-year" value={year || ''} onChange={(e) => setYear(e.target.value)}>
+            {years.map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+        )}
+
+        <button className={`ch-toggle ${showMA ? 'active' : ''}`} onClick={() => setShowMA((v) => !v)}>
+          MA
+        </button>
+        <button className={`ch-toggle replay ${replay.active ? 'active' : ''}`} onClick={toggleReplay}>
+          ⏵ Replay
+        </button>
+      </div>
+
+      <div className="ch-tools">
+        {TOOLS.map((t) => (
+          <button
+            key={t.id}
+            className={`ch-tool ${tool === t.id ? 'active' : ''}`}
+            onClick={() => setTool(t.id)}
+            title={t.name}
+          >
+            <span className="ch-tool-icon">{t.icon}</span>
+          </button>
+        ))}
+        <span className="ch-tool-sep" />
+        <button
+          className="ch-tool"
+          title="Delete selected"
+          disabled={!selected}
+          onClick={() => {
+            setDrawings((ds) => ds.filter((d) => d.id !== selected))
+            setSelected(null)
+          }}
+        >
+          🗑
+        </button>
+        <button
+          className="ch-tool"
+          title="Clear all drawings"
+          disabled={!drawings.length}
+          onClick={() => {
+            setDrawings([])
+            setSelected(null)
+          }}
+        >
+          Clear
+        </button>
+        {drawings.length > 0 && <span className="ch-tool-count">{drawings.length}</span>}
+      </div>
+
+      {replay.active && data && (
+        <div className="ch-replay">
+          <div className="ch-replay-controls">
+            <button
+              className={`pick ${replay.picking ? 'active' : ''}`}
+              onClick={() => setReplay((r) => ({ ...r, picking: true, playing: false }))}
+              title="Choose a new start bar"
+            >
+              ⊢
+            </button>
+            <button onClick={() => stepReplay(-1)} title="Previous candle" disabled={replay.picking}>⏮</button>
+            <button
+              className="play"
+              onClick={() => setReplay((r) => ({ ...r, playing: !r.playing }))}
+              title="Play / pause (space)"
+              disabled={replay.picking}
+            >
+              {replay.playing ? '⏸' : '▶'}
+            </button>
+            <button onClick={() => stepReplay(1)} title="Next candle" disabled={replay.picking}>⏭</button>
+          </div>
+
+          <div className="ch-speeds">
+            {SPEEDS.map((s) => (
+              <button
+                key={s.label}
+                className={`ch-speed ${replay.ms === s.ms ? 'active' : ''}`}
+                onClick={() => setReplay((r) => ({ ...r, ms: s.ms }))}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+
+          <input
+            className="ch-scrub"
+            type="range"
+            min={0}
+            max={Math.max(0, data.count - 1)}
+            value={replay.at}
+            disabled={replay.picking}
+            onChange={(e) => setReplay((r) => ({ ...r, at: +e.target.value, playing: false }))}
+          />
+          <span className="ch-replay-pos">
+            {(replay.at + 1).toLocaleString('en-IN')} / {data.count.toLocaleString('en-IN')}
+          </span>
+        </div>
+      )}
+
+      {replay.active && !replay.picking && data && (
+        <div className="ch-trade">
+          <div className="ch-trade-risk">
+            <label>
+              SL pts
+              <input
+                type="number"
+                min="0.05"
+                step="1"
+                value={risk.pts}
+                disabled={!!pos}
+                onChange={(e) => setRisk((r) => ({ ...r, pts: +e.target.value }))}
+              />
+            </label>
+            <label>
+              Target
+              <select
+                value={risk.r}
+                disabled={!!pos}
+                onChange={(e) => setRisk((r) => ({ ...r, r: +e.target.value }))}
+              >
+                <option value={1}>1R</option>
+                <option value={1.5}>1.5R</option>
+                <option value={2}>2R</option>
+                <option value={3}>3R</option>
+                <option value={0}>No target</option>
+              </select>
+            </label>
+          </div>
+
+          {!pos ? (
+            <div className="ch-trade-actions">
+              <button className="buy" onClick={() => openPosition('long')}>▲ BUY</button>
+              <button className="sell" onClick={() => openPosition('short')}>▼ SELL</button>
+            </div>
+          ) : (
+            <>
+              <div className={`ch-trade-open ${livePnl.points >= 0 ? 'win' : 'loss'}`}>
+                <b>{pos.side === 'long' ? 'LONG' : 'SHORT'}</b>
+                <span>@ {fmtPrice(pos.entry)}</span>
+                <span>SL {fmtPrice(pos.sl)}</span>
+                {pos.tp != null && <span>TP {fmtPrice(pos.tp)}</span>}
+                <b className="ch-trade-pnl">
+                  {livePnl.points >= 0 ? '+' : ''}{fmtPrice(livePnl.points)} pts ·{' '}
+                  {livePnl.r >= 0 ? '+' : ''}{livePnl.r.toFixed(2)}R
+                </b>
+              </div>
+              <button
+                className="ch-trade-close"
+                onClick={() => closePosition(data.c[replay.at], 'manual', replay.at)}
+              >
+                ✕ Close
+              </button>
+            </>
+          )}
+
+          <div className="ch-trade-stats">
+            <span><b>{tradeStats.n}</b> trades</span>
+            <span><b>{tradeStats.winRate.toFixed(0)}%</b> win</span>
+            <span className={tradeStats.points >= 0 ? 'tone-pos' : 'tone-neg'}>
+              <b>{tradeStats.points >= 0 ? '+' : ''}{fmtPrice(tradeStats.points)}</b> pts
+            </span>
+            <span className={tradeStats.totalR >= 0 ? 'tone-pos' : 'tone-neg'}>
+              <b>{tradeStats.totalR >= 0 ? '+' : ''}{tradeStats.totalR.toFixed(1)}R</b>
+            </span>
+            {tradeLog.length > 0 && (
+              <button
+                className="ch-trade-clear"
+                onClick={() => window.confirm('Clear replay trade history?') && setTradeLog([])}
+              >
+                clear
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {replay.active && !replay.picking && tradeLog.length > 0 && (
+        <details className="ch-tradelog">
+          <summary>Trade history ({tradeLog.length})</summary>
+          <div className="ch-tradelog-wrap">
+            <table>
+              <thead>
+                <tr><th>Side</th><th>In</th><th>Out</th><th className="num">Entry</th><th className="num">Exit</th><th className="num">Pts</th><th className="num">R</th><th>Why</th></tr>
+              </thead>
+              <tbody>
+                {tradeLog.map((t) => (
+                  <tr key={t.id}>
+                    <td><span className={`side ${t.side}`}>{t.side}</span></td>
+                    <td>{t.entryTime}</td>
+                    <td>{t.exitTime}</td>
+                    <td className="num">{fmtPrice(t.entry)}</td>
+                    <td className="num">{fmtPrice(t.exit)}</td>
+                    <td className={`num ${t.points >= 0 ? 'tone-pos' : 'tone-neg'}`}>
+                      {t.points >= 0 ? '+' : ''}{fmtPrice(t.points)}
+                    </td>
+                    <td className={`num ${t.r >= 0 ? 'tone-pos' : 'tone-neg'}`}>
+                      {t.r >= 0 ? '+' : ''}{t.r.toFixed(2)}
+                    </td>
+                    <td>{t.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
+
+      {data && readIdx != null && readIdx >= 0 && (
+        <div className="ch-readout">
+          <span className="ch-date">{fmtDate(data.t[readIdx], tf)}</span>
+          <span>O <b>{fmtPrice(data.o[readIdx])}</b></span>
+          <span>H <b>{fmtPrice(data.h[readIdx])}</b></span>
+          <span>L <b>{fmtPrice(data.l[readIdx])}</b></span>
+          <span>C <b>{fmtPrice(data.c[readIdx])}</b></span>
+          <span className={change >= 0 ? 'tone-pos' : 'tone-neg'}>
+            {change >= 0 ? '+' : ''}{fmtPrice(change)} ({changePct >= 0 ? '+' : ''}{changePct.toFixed(2)}%)
+          </span>
+        </div>
+      )}
+
+      <div className={`ch-canvas-wrap tool-${tool}`} ref={wrapRef}>
+        <canvas ref={canvasRef} />
+        {loading && <div className="ch-overlay">Loading candles…</div>}
+        {error && <div className="ch-overlay error">Could not load data ({error})</div>}
+      </div>
+
+      <div className="ch-footer">
+        <div className="ch-zoom">
+          <span className="ch-zoom-label">↔</span>
+          <button onClick={() => zoomBtn(1 / 1.4)} title="Zoom in (time)">＋</button>
+          <button onClick={() => zoomBtn(1.4)} title="Zoom out (time)">−</button>
+          <span className="ch-zoom-label">↕</span>
+          <button
+            title="Zoom in (price)"
+            onClick={() =>
+              setPriceScale((ps) => ({ ...ps, zoom: Math.max(0.05, ps.zoom / 1.3), auto: false }))
+            }
+          >
+            ＋
+          </button>
+          <button
+            title="Zoom out (price)"
+            onClick={() =>
+              setPriceScale((ps) => ({ ...ps, zoom: Math.min(20, ps.zoom * 1.3), auto: false }))
+            }
+          >
+            −
+          </button>
+          <button
+            className={priceScale.auto ? '' : 'accent'}
+            title="Reset zoom and auto-fit the price scale"
+            onClick={() => {
+              setPriceScale({ zoom: 1, offset: 0, auto: true })
+              if (data)
+                setView({ start: Math.max(0, data.count - 200), count: Math.min(200, data.count) })
+            }}
+          >
+            Reset
+          </button>
+        </div>
+        <span className="ch-hint">
+          {tool !== 'cursor'
+            ? `${TOOLS.find((t) => t.id === tool).name} — drag on the chart · Esc to cancel`
+            : replay.active
+              ? 'Tap a candle to jump · space = play/pause · ← → step'
+              : data
+                ? `${data.count.toLocaleString('en-IN')} bars · drag to pan · pinch/scroll to zoom · drag the price axis for vertical zoom`
+                : ''}
+        </span>
+      </div>
+    </div>
+  )
+}

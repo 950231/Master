@@ -1,0 +1,525 @@
+.chart-app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px 16px 28px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.ch-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.ch-header h1 {
+  margin: 0;
+  font-size: 22px;
+  text-align: center;
+  letter-spacing: -0.3px;
+}
+.ch-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: start;
+}
+.ch-head-spacer {
+  justify-self: end;
+}
+
+/* ---------- Toolbar ---------- */
+.ch-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.ch-tfs {
+  display: flex;
+  gap: 3px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 3px;
+}
+.ch-tf {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 7px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.ch-tf:hover {
+  color: var(--text);
+}
+.ch-tf.active {
+  background: var(--accent);
+  color: #04121d;
+}
+
+.ch-year,
+.ch-toggle {
+  background: var(--panel);
+  border: 1px solid var(--border-light);
+  color: var(--text);
+  border-radius: 9px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ch-toggle.active {
+  background: var(--accent);
+  color: #04121d;
+  border-color: transparent;
+}
+
+/* ---------- Drawing tools ---------- */
+.ch-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.ch-tool {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  border-radius: 8px;
+  min-width: 40px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+}
+.ch-tool:hover:not(:disabled) {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.ch-tool.active {
+  background: var(--accent);
+  color: #04121d;
+}
+.ch-tool:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.ch-tool-icon {
+  font-size: 16px;
+}
+.ch-tool-sep {
+  width: 1px;
+  height: 22px;
+  background: var(--border-light);
+  margin: 0 4px;
+}
+.ch-tool-count {
+  font-size: 11px;
+  color: var(--text-faint);
+  padding-right: 6px;
+}
+
+/* Cursor hints per active tool */
+.ch-canvas-wrap.tool-cursor {
+  cursor: crosshair;
+}
+.ch-canvas-wrap.tool-trend,
+.ch-canvas-wrap.tool-hline,
+.ch-canvas-wrap.tool-rect,
+.ch-canvas-wrap.tool-fib,
+.ch-canvas-wrap.tool-arrow,
+.ch-canvas-wrap.tool-measure {
+  cursor: copy;
+}
+.ch-canvas-wrap.tool-brush {
+  cursor: cell;
+}
+
+/* ---------- Replay bar ---------- */
+.ch-replay {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 9px 12px;
+  margin-bottom: 10px;
+}
+
+.ch-replay-controls {
+  display: flex;
+  gap: 6px;
+}
+.ch-replay-controls button {
+  background: var(--panel-2);
+  border: 1px solid var(--border-light);
+  color: var(--text);
+  border-radius: 8px;
+  min-width: 42px;
+  padding: 8px 10px;
+  font-size: 15px;
+  cursor: pointer;
+  line-height: 1;
+}
+.ch-replay-controls button:hover {
+  background: var(--border-light);
+}
+.ch-replay-controls button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.ch-replay-controls .pick.active {
+  background: var(--red);
+  color: #fff;
+  border-color: transparent;
+}
+.ch-replay-controls .play {
+  background: var(--accent);
+  color: #04121d;
+  border-color: transparent;
+  font-weight: 700;
+  min-width: 54px;
+}
+
+.ch-speeds {
+  display: flex;
+  gap: 3px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+}
+.ch-speed {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.ch-speed.active {
+  background: var(--accent);
+  color: #04121d;
+}
+
+.ch-scrub {
+  flex: 1;
+  min-width: 140px;
+  accent-color: var(--accent);
+}
+.ch-replay-pos {
+  font-size: 12px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ch-toggle.replay.active {
+  background: var(--accent);
+  color: #04121d;
+}
+
+/* ---------- Readout ---------- */
+.ch-readout {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text-dim);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 14px;
+  margin-bottom: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.ch-readout b {
+  color: var(--text);
+  font-weight: 700;
+}
+.ch-date {
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* ---------- Canvas ---------- */
+.ch-canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 380px;
+  height: 58vh;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: crosshair;
+  touch-action: none; /* we handle pan/pinch ourselves */
+}
+.ch-canvas-wrap canvas {
+  display: block;
+}
+
+.ch-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-faint);
+  font-size: 14px;
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+.ch-overlay.error {
+  color: var(--red);
+}
+
+/* ---------- Footer ---------- */
+.ch-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.ch-zoom {
+  display: flex;
+  gap: 6px;
+}
+.ch-zoom button {
+  background: var(--panel);
+  border: 1px solid var(--border-light);
+  color: var(--text);
+  border-radius: 9px;
+  padding: 8px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  min-width: 44px;
+}
+.ch-zoom button:hover {
+  background: var(--panel-2);
+}
+.ch-zoom button.accent {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.ch-zoom-label {
+  color: var(--text-faint);
+  font-size: 14px;
+  padding: 0 2px 0 6px;
+  align-self: center;
+}
+.ch-hint {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+@media (max-width: 560px) {
+  .ch-header {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 8px;
+  }
+  .ch-left {
+    justify-self: center;
+  }
+  .ch-canvas-wrap {
+    height: 52vh;
+    min-height: 300px;
+  }
+  .ch-readout {
+    gap: 10px;
+    font-size: 12px;
+  }
+}
+
+/* ---------- Replay paper trading ---------- */
+.ch-trade {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  background: var(--panel);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 9px 12px;
+  margin-bottom: 10px;
+}
+.ch-trade-risk {
+  display: flex;
+  gap: 12px;
+}
+.ch-trade-risk label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.ch-trade-risk input,
+.ch-trade-risk select {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  color: var(--text);
+  border-radius: 7px;
+  padding: 6px 8px;
+  font-size: 13px;
+  width: 78px;
+}
+.ch-trade-risk input:disabled,
+.ch-trade-risk select:disabled {
+  opacity: 0.5;
+}
+
+.ch-trade-actions {
+  display: flex;
+  gap: 8px;
+}
+.ch-trade-actions button {
+  border: none;
+  border-radius: 9px;
+  padding: 9px 18px;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  color: #fff;
+}
+.ch-trade-actions .buy {
+  background: var(--green);
+  color: #04160b;
+}
+.ch-trade-actions .sell {
+  background: var(--red);
+}
+
+.ch-trade-open {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+}
+.ch-trade-open b {
+  color: var(--text);
+}
+.ch-trade-open.win {
+  border-color: var(--green);
+}
+.ch-trade-open.loss {
+  border-color: var(--red);
+}
+.ch-trade-open.win .ch-trade-pnl {
+  color: var(--green);
+}
+.ch-trade-open.loss .ch-trade-pnl {
+  color: var(--red);
+}
+.ch-trade-close {
+  background: var(--panel-2);
+  border: 1px solid var(--border-light);
+  color: var(--text);
+  border-radius: 9px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ch-trade-stats {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.ch-trade-stats b {
+  color: var(--text);
+  font-size: 14px;
+}
+.ch-trade-stats .tone-pos b { color: var(--green); }
+.ch-trade-stats .tone-neg b { color: var(--red); }
+.ch-trade-clear {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.ch-tradelog {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+.ch-tradelog summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.ch-tradelog-wrap {
+  overflow-x: auto;
+  margin-top: 8px;
+}
+.ch-tradelog table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 620px;
+}
+.ch-tradelog th {
+  text-align: left;
+  padding: 6px 8px;
+  color: var(--text-faint);
+  font-size: 11px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.ch-tradelog td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ch-tradelog .num { text-align: right; }
+.ch-tradelog .side {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 5px;
+  text-transform: uppercase;
+}
+.ch-tradelog .side.long { color: var(--green); background: rgba(34,197,94,.13); }
+.ch-tradelog .side.short { color: var(--red); background: rgba(239,68,68,.13); }
+
+@media (max-width: 640px) {
+  .ch-trade-stats { margin-left: 0; width: 100%; }
+}
